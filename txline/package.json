@@ -1,0 +1,21 @@
+{
+  "name": "stakely-txline",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "activate": "tsx activate.ts",
+    "stream:scores": "tsx client/stream-scores.ts",
+    "stream:odds": "tsx client/stream-odds.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0",
+    "axios": "^1.9.0",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.3",
+    "typescript": "~5.9.3"
+  }
+}
