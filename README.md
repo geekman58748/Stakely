@@ -1,8 +1,8 @@
-# P2P World Cup Wagering App — Project Plan
+# Stakely Project Plan
 
 ## Product Overview
 
-A peer-to-peer (P2P) sports wagering web app for the World Cup. Users create and accept micro wagers (as low as $1) directly against friends using stablecoins (USDC/USDT) on Solana. Wagers are held in a secure escrow smart contract and settled automatically via decentralized data oracles (TxlineOdds). The app includes a companion Telegram bot for social mapping and real-time match alerts, alongside a gamified AI Agent track where users customize autonomous prediction bots to analyze games and trigger bets.
+Stakely is a peer-to-peer (P2P) sports wagering web app for the World Cup. Users create and accept micro wagers (as low as $1) directly against friends using stablecoins (USDC/USDT) on Solana. Wagers are held in a secure escrow smart contract and settled automatically via decentralized data oracles (TxlineOdds). The app includes a companion Telegram bot for social mapping and real-time match alerts, alongside a gamified AI Agent track where users customize autonomous prediction bots to analyze games and trigger bets.
 
 ---
 
