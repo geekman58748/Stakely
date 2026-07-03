@@ -7,6 +7,7 @@ import { betsRouter }      from "./routes/bets.js";
 import { leaderboardRouter } from "./routes/leaderboard.js";
 import { botsRouter }      from "./routes/bots.js";
 import { telegramRouter }  from "./routes/telegram.js";
+import { registerWebhook } from "./lib/telegram.js";
 
 const app  = express();
 const PORT = process.env.PORT ?? 4000;
@@ -42,5 +43,11 @@ app.listen(PORT, async () => {
     console.log(`[startup] synced ${count} fixtures from TxLINE`);
   } catch (e: any) {
     console.warn("[startup] fixture sync failed:", e.message);
+  }
+
+  // Register Telegram webhook (Railway sets RAILWAY_PUBLIC_DOMAIN)
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  if (domain) {
+    await registerWebhook(`https://${domain}/api/telegram/webhook`).catch(() => null);
   }
 });
