@@ -67,7 +67,7 @@ router.post("/predict/:matchId", requireAuth, async (req, res) => {
   // Fetch match + odds
   const [{ data: match }, odds] = await Promise.all([
     db.from("matches").select("*").eq("id", matchId).single(),
-    txline.getOdds(matchId).catch(() => null),
+    txline.getOdds(String(matchId)).catch(() => null),
   ]);
   if (!match) { res.status(404).json({ error: "Match not found" }); return; }
 
@@ -106,7 +106,7 @@ router.post("/predict/:matchId", requireAuth, async (req, res) => {
     }
   } else {
     // Fallback analysis without LLM
-    analysis = `${match.home_team} vs ${match.away_team}: Based on current odds (Home ${odds?.homeOdds}, Draw ${odds?.drawOdds}, Away ${odds?.awayOdds}), risk level ${riskLevel}/10 suggests ${odds?.homeOdds < (odds?.awayOdds ?? 99) ? match.home_team : match.away_team} as the value pick.`;
+    analysis = `${match.home_team} vs ${match.away_team}: Based on current odds (Home ${odds?.homeOdds}, Draw ${odds?.drawOdds}, Away ${odds?.awayOdds}), risk level ${riskLevel}/10 suggests ${(odds?.homeOdds ?? 99) < (odds?.awayOdds ?? 99) ? match.home_team : match.away_team} as the value pick.`;
     prediction = (odds?.homeOdds ?? 2) < (odds?.awayOdds ?? 2) ? "home" : "away";
     confidence = 60 + riskLevel * 2;
   }
