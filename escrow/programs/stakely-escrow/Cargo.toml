@@ -1,0 +1,20 @@
+[package]
+name = "stakely-escrow"
+version = "0.1.0"
+description = "Stakely P2P bet escrow — locks USDC for both sides, settles to winner"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "stakely_escrow"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang  = { version = "0.31.0", features = ["init-if-needed"] }
+anchor-spl   = { version = "0.31.0", features = ["token"] }
