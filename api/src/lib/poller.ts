@@ -1,10 +1,11 @@
 import { db } from "./supabase.js";
 import { txline } from "./txline.js";
-import { notifySettlement, notifyLosing } from "./telegram.js";
+import { notifySettlement, notifyLosing, notifyMatchSoon } from "./telegram.js";
 
 const POLL_MS       = 3 * 60 * 1000;   // poll every 3 min
 const ROAST_COOL_MS = 15 * 60 * 1000;  // max one roast per bet per 15 min
 const lastRoasted   = new Map<string, number>();
+const pingedSoon    = new Set<string>(); // match IDs already pinged — resets on redeploy (fine)
 
 const FINISH_STATES = new Set(["finished", "FT", "AET", "PEN", "Ended", "ended"]);
 
@@ -37,6 +38,7 @@ async function tick() {
         await roastLosers(match.id, match.home_team, match.away_team, score.homeScore, score.awayScore, score.minute);
       }
     }));
+    await pingUpcomingMatches();
   } catch (e: any) {
     console.error("[poller] tick error:", e.message);
   }
@@ -151,6 +153,49 @@ async function roastLosers(
       loseScore, leadScore, minute,
     );
   }));
+}
+
+
+// ── Upcoming match hype pings ─────────────────────────────────────────────────
+// Fires once per match when kickoff is 30–45 min away
+// Pings every user with a linked Telegram — tells them to get a bet in before it starts
+async function pingUpcomingMatches() {
+  try {
+    const now    = Date.now();
+    const lo     = new Date(now + 30 * 60 * 1000).toISOString(); // 30 min from now
+    const hi     = new Date(now + 45 * 60 * 1000).toISOString(); // 45 min from now
+
+    const { data: upcoming } = await db.from("matches")
+      .select("id,home_team,away_team,kickoff_at")
+      .eq("status", "scheduled")
+      .gte("kickoff_at", lo)
+      .lte("kickoff_at", hi);
+
+    if (!upcoming?.length) return;
+
+    const unpinged = upcoming.filter(m => !pingedSoon.has(m.id));
+    if (!unpinged.length) return;
+
+    // Get all users with linked Telegram
+    const { data: users } = await db.from("users")
+      .select("telegram_id")
+      .not("telegram_id", "is", null);
+
+    if (!users?.length) return;
+
+    for (const match of unpinged) {
+      pingedSoon.add(match.id);
+      const minsUntil = Math.round((new Date(match.kickoff_at).getTime() - now) / 60000);
+      await Promise.all(
+        users
+          .filter((u): u is { telegram_id: number } => u.telegram_id !== null)
+          .map(u => notifyMatchSoon(u.telegram_id, match.home_team, match.away_team, minsUntil))
+      );
+      console.log("[poller] pinged", users.length, "users — match soon:", match.home_team, "vs", match.away_team);
+    }
+  } catch (e: any) {
+    console.error("[poller] pingUpcomingMatches error:", e.message);
+  }
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
