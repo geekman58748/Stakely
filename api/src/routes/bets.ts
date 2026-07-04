@@ -65,7 +65,10 @@ router.post("/", requireAuth, async (req, res) => {
   // Verify match exists and hasn't started
   const { data: match } = await db.from("matches").select("id,kickoff_at,status").eq("id", match_id).single();
   if (!match) { res.status(404).json({ error: "Match not found" }); return; }
-  if (match.status !== "scheduled") { res.status(400).json({ error: "Match has already started or finished" }); return; }
+  if (match.status === "finished" || match.status === "cancelled" || match.status === "postponed") {
+    res.status(400).json({ error: "Match is already finished — no new bets accepted" }); return;
+  }
+  // Live betting allowed — users can challenge friends mid-match
 
   // Get creator's user ID
   const { data: creator } = await db.from("users").select("id").eq("wallet_address", req.walletAddress!).single();
