@@ -168,3 +168,24 @@ export async function registerWebhook(webhookUrl: string) {
   const data = await res.json() as any;
   console.log("[telegram] webhook:", data.ok ? "registered ✅" : data.description);
 }
+
+// ── Mid-game roast ─────────────────────────────────────────────────────────────
+const LOSING_MIDGAME = (name: string, losingTeam: string, leadingTeam: string, loseScore: number, leadScore: number, min: number | null): string => {
+  const t = min ? `(${min}')` : "rn";
+  return pick([
+    `${name} ur watching ${losingTeam} get cooked ${leadScore}-${loseScore} ${t}. ur USDC is already gone mentally`,
+    `bro ${name} ${losingTeam} is down ${leadScore}-${loseScore} ${t}. hope ur ready to lose that bag`,
+    `${name} ${leadingTeam} is up ${leadScore}-${loseScore} ${t}. ${losingTeam} is not doing u any favours rn`,
+    `${name} checked the score yet? ${leadingTeam} ${leadScore}-${loseScore} ${losingTeam} ${t}. might wanna look away`,
+    `${name} the math ain't mathing for ${losingTeam} ${t}. ${leadScore}-${loseScore} down. start grieving ur USDC`,
+  ]);
+};
+
+export async function notifyLosing(
+  tgId: number, name: string,
+  losingTeam: string, leadingTeam: string,
+  loseScore: number, leadScore: number,
+  minute: number | null
+) {
+  await send(tgId, LOSING_MIDGAME(name, losingTeam, leadingTeam, loseScore, leadScore, minute));
+}
