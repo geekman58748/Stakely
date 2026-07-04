@@ -189,3 +189,19 @@ export async function notifyLosing(
 ) {
   await send(tgId, LOSING_MIDGAME(name, losingTeam, leadingTeam, loseScore, leadScore, minute));
 }
+
+// ── Match-soon hype ───────────────────────────────────────────────────────────
+const MATCH_SOON = (homeTeam: string, awayTeam: string, mins: number): string => {
+  const t = mins <= 5 ? "RIGHT NOW" : "in " + mins + " min";
+  return pick([
+    "yo " + homeTeam + " vs " + awayTeam + " kicks off " + t + " 🔥 wanna challenge a friend? open the app before it starts",
+    homeTeam + " vs " + awayTeam + " " + t + ". last chance to lock in a bet before kick off ⏰",
+    "heads up — " + homeTeam + " vs " + awayTeam + " " + t + ". got someone to bet against? move fast",
+    homeTeam + " vs " + awayTeam + " about to go " + t + ". who u got? make it count",
+    "it’s almost time. " + homeTeam + " vs " + awayTeam + " " + t + ". throw down a challenge while u can 🎯",
+  ]);
+};
+
+export async function notifyMatchSoon(tgId: number, homeTeam: string, awayTeam: string, minsUntil: number) {
+  await send(tgId, MATCH_SOON(homeTeam, awayTeam, minsUntil));
+}
