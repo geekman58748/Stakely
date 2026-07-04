@@ -32,7 +32,7 @@ async function tick() {
       }).eq("id", match.id);
 
       if (FINISH_STATES.has(score.status)) {
-        await settleBetsForMatch(match.id, match.home_team, match.away_team, score.homeScore, score.awayScore);
+        await settleBetsForMatch(match.id, match.home_team, match.away_team, score.homeScore, score.awayScore, score.merkleProof);
       } else {
         await roastLosers(match.id, match.home_team, match.away_team, score.homeScore, score.awayScore, score.minute);
       }
@@ -45,7 +45,8 @@ async function tick() {
 // ── Auto-settlement ───────────────────────────────────────────────────────────
 async function settleBetsForMatch(
   matchId: string, homeTeam: string, awayTeam: string,
-  homeScore: number, awayScore: number
+  homeScore: number, awayScore: number,
+  merkleProof?: unknown
 ) {
   const { data: bets } = await db.from("bets")
     .select(`id, creator_side, amount_usdc,
@@ -55,6 +56,14 @@ async function settleBetsForMatch(
     .in("status", ["challenged", "locked", "live"]);
 
   if (!bets?.length) return;
+
+  // Store Merkle proof on the match record — cryptographic receipt of the result
+  if (merkleProof) {
+    await db.from("matches").update({
+      merkle_proof:      merkleProof,
+      merkle_stored_at:  new Date().toISOString(),
+    }).eq("id", matchId);
+  }
 
   const result: "home" | "away" | "draw" =
     homeScore > awayScore ? "home" : awayScore > homeScore ? "away" : "draw";
