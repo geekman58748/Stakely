@@ -39,6 +39,7 @@ export interface LiveScore {
   awayScore: number;
   minute: number | null;
   status: string;
+  merkleProof?: unknown; // raw TxLINE score payload — cryptographic receipt for settlement
 }
 
 // ── Mock data (realistic WC 2026 fixtures) ─────────────────────────────────────
@@ -129,10 +130,11 @@ class TxLineRealClient {
     const raw = await this.get<any>(`/api/scores/snapshot/${fixtureId}`);
     return {
       fixtureId,
-      homeScore: raw.Participant1Goals ?? 0,
-      awayScore: raw.Participant2Goals ?? 0,
-      minute:    raw.Minute ?? null,
-      status:    raw.GamePhase ?? "NS",
+      homeScore:   raw.Participant1Goals ?? 0,
+      awayScore:   raw.Participant2Goals ?? 0,
+      minute:      raw.Minute ?? null,
+      status:      raw.GamePhase ?? "NS",
+      merkleProof: raw, // preserve full payload — contains hashes, signatures, proof fields
     };
   }
 }
@@ -157,7 +159,15 @@ class TxLineMockClient {
   }
   async getScore(id: string): Promise<LiveScore> {
     const f = MOCK_FIXTURES.find(x => x.id === id);
-    return { fixtureId: id, homeScore: f?.status === "finished" ? 2 : 1, awayScore: 1, minute: f?.status === "live" ? 67 : null, status: f?.status ?? "scheduled" };
+    const finished = f?.status === "finished";
+    return {
+      fixtureId: id,
+      homeScore: finished ? 2 : 1,
+      awayScore: 1,
+      minute:    f?.status === "live" ? 67 : null,
+      status:    f?.status ?? "scheduled",
+      merkleProof: finished ? { fixtureId: id, merkleRoot: `mock_root_${id}`, signature: `mock_sig_${Date.now()}`, ts: new Date().toISOString() } : undefined,
+    };
   }
 }
 
