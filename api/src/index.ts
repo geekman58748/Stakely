@@ -8,6 +8,7 @@ import { leaderboardRouter } from "./routes/leaderboard.js";
 import { botsRouter }      from "./routes/bots.js";
 import { telegramRouter }  from "./routes/telegram.js";
 import { registerWebhook } from "./lib/telegram.js";
+import { startPoller }    from "./lib/poller.js";
 
 const app  = express();
 const PORT = process.env.PORT ?? 4000;
@@ -44,6 +45,9 @@ app.listen(PORT, async () => {
   } catch (e: any) {
     console.warn("[startup] fixture sync failed:", e.message);
   }
+
+  // Start live match poller
+  startPoller();
 
   // Register Telegram webhook (Railway sets RAILWAY_PUBLIC_DOMAIN)
   const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
