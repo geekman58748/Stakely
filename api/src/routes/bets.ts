@@ -155,6 +155,11 @@ router.post("/:id/settle", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Bet must be locked or live to settle" }); return;
   }
 
+  // Only a participant (creator or counterparty) can settle their own bet
+  const { data: caller } = await db.from("users").select("id").eq("wallet_address", req.walletAddress!).single();
+  const isParticipant = caller && (caller.id === bet.creator_id || caller.id === bet.counterparty_id);
+  if (!isParticipant) { res.status(403).json({ error: "Only a bet participant can settle this bet" }); return; }
+
   let winner_id: string | null = null;
   if (winner_wallet) {
     const { data: w } = await db.from("users").select("id").eq("wallet_address", winner_wallet).single();
