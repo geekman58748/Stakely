@@ -71,10 +71,10 @@ router.get("/user/:telegramId", async (req, res) => {
 
 /** POST /telegram/webhook — Telegram Bot API webhook handler */
 router.post("/webhook", async (req, res) => {
-  res.sendStatus(200); // Acknowledge immediately — Telegram needs this fast
+  res.sendStatus(200); // acknowledge immediately
 
   const update = req.body;
-  const msg = update.message ?? update.edited_message;
+  const msg    = update.message ?? update.edited_message;
   if (!msg?.text) return;
 
   const chatId  = msg.chat.id;
@@ -82,11 +82,26 @@ router.post("/webhook", async (req, res) => {
   const handle  = msg.from?.username;
   const text    = msg.text.trim();
   const parts   = text.split(/\s+/);
-  const command = parts[0].toLowerCase();
+  const command = parts[0].toLowerCase().split("@")[0]; // strip @BotName suffix
+
+  // helper: side code -> team name
+  const teamName = (side: string, homeTeam: string, awayTeam: string) =>
+    side === "home" ? homeTeam : side === "away" ? awayTeam : "Draw";
 
   // ── /start ──────────────────────────────────────────────────────────────────
   if (command === "/start") {
-    await tgSend(chatId, "stakely.\n\np2p bets on World Cup matches, settled on Solana.\n\nto get started:\n1. open the app and go to Settings\n2. tap 'Link Telegram'\n3. send me /link <code>\n\ncommands:\n/scores — live scores\n/bets — open challenges");
+    await tgSend(chatId,
+      "hey! i'm Stakely \u{1F44B}\n\n" +
+      "bet on World Cup matches with your friends. pick a team, put in USDC, winner takes the pot.\n\n" +
+      "to get started:\n" +
+      "1. open the Stakely app\n" +
+      "2. tap Settings > Link Telegram\n" +
+      "3. come back here and send me that code\n\n" +
+      "once you're linked:\n" +
+      "/scores — see live match scores\n" +
+      "/bets — see bets you can jump on\n" +
+      "/mybets — see your own active bets"
+    );
     return;
   }
 
@@ -94,42 +109,36 @@ router.post("/webhook", async (req, res) => {
   if (command === "/link") {
     const code = parts[1];
     if (!code) {
-      await tgSend(chatId, "usage: /link <code>\n\nget ur code from the app → Settings → Link Telegram");
+      await tgSend(chatId, "to link your wallet:\n1. open the Stakely app\n2. tap Settings > Link Telegram\n3. send me: /link <your code>\n\nthe code expires in 10 minutes");
       return;
     }
 
-    // Look up code directly in Supabase
     const { data: linkCode } = await db.from("telegram_link_codes")
-      .select("*")
-      .eq("code", code.toUpperCase())
-      .is("used_at", null)
-      .gt("expires_at", new Date().toISOString())
-      .single();
+      .select("*").eq("code", code.toUpperCase())
+      .is("used_at", null).gt("expires_at", new Date().toISOString()).single();
 
     if (!linkCode) {
-      await tgSend(chatId, "that code doesn't work. either it expired (10 min limit) or it's already been used. get a fresh one from the app");
+      await tgSend(chatId, "that code didn't work — it may have expired (10 min limit) or already been used. get a fresh one from the app.");
       return;
     }
 
-    // Mark used
     await db.from("telegram_link_codes").update({ used_at: new Date().toISOString() }).eq("code", code.toUpperCase());
 
-    // Link wallet to telegram
     const { data: user, error } = await db.from("users")
       .update({ telegram_id: fromId, telegram_handle: handle ?? null })
       .eq("wallet_address", linkCode.wallet_address)
       .select().single();
 
     if (error || !user) {
-      await tgSend(chatId, "linked the code but couldn't find ur wallet in the app. make sure u signed in first");
+      await tgSend(chatId, "code worked but your wallet wasn't found. make sure you've opened the app and signed in at least once first.");
       return;
     }
 
-    await tgSend(chatId, `linked ✅ ${user.display_name ?? handle ?? "anon"} ur wallet is connected. u'll get pinged here for bets, scores, and settlements`);
+    await tgSend(chatId, "linked \u2705 you're all set, " + (user.display_name ?? handle ?? "anon") + "\n\nyou'll get pinged here when:\n- someone accepts your bet\n- a match you bet on goes live\n- your bet settles\n\ntype /bets to see what's open");
     return;
   }
 
-  // ── /scores ─────────────────────────────────────────────────────────────────────────────
+  // ── /scores ─────────────────────────────────────────────────────────────────
   if (command === "/scores") {
     const { data: liveMatches } = await db.from("matches")
       .select("id,home_team,away_team,home_score,away_score")
@@ -137,48 +146,80 @@ router.post("/webhook", async (req, res) => {
       .order("kickoff_at", { ascending: true });
 
     if (!liveMatches?.length) {
-      await tgSend(chatId, "no live matches rn. check back when a game's on");
+      await tgSend(chatId, "no games live right now. check back when a match kicks off.");
       return;
     }
 
-    // Fresh per-fixture score from TxLINE; fall back to cached on error
     const lines = await Promise.all(liveMatches.map(async (m) => {
       try {
         const s = await txline.getScore(m.id);
-        return m.home_team + " " + s.homeScore + "–" + s.awayScore + " " + m.away_team + (s.minute ? " (" + s.minute + "')" : "");
+        return m.home_team + " " + s.homeScore + "\u2013" + s.awayScore + " " + m.away_team + (s.minute ? " (" + s.minute + "')" : "");
       } catch {
-        return m.home_team + " " + (m.home_score ?? 0) + "–" + (m.away_score ?? 0) + " " + m.away_team;
+        return m.home_team + " " + (m.home_score ?? 0) + "\u2013" + (m.away_score ?? 0) + " " + m.away_team;
       }
     }));
     await tgSend(chatId, "live scores:\n\n" + lines.join("\n"));
     return;
   }
 
-    // ── /bets ───────────────────────────────────────────────────────────────────
+  // ── /bets — open challenges anyone can accept (no login needed) ─────────────
   if (command === "/bets") {
-    const { data: user } = await db.from("users").select("id").eq("telegram_id", fromId).single();
-    if (!user) {
-      await tgSend(chatId, "ur wallet isn't linked yet. send /link <code> first");
-      return;
-    }
-
     const { data: bets } = await db.from("bets")
-      .select("*, match:matches(home_team,away_team), creator:users!bets_creator_id_fkey(display_name)")
+      .select("amount_usdc, creator_side, match:matches(home_team,away_team), creator:users!bets_creator_id_fkey(display_name)")
       .eq("status", "challenged")
       .order("created_at", { ascending: false })
       .limit(5);
 
     if (!bets?.length) {
-      await tgSend(chatId, "no open bets right now. be the one who creates one");
+      await tgSend(chatId, "no open bets right now.\n\nbe the first — open the app and challenge someone.");
       return;
     }
 
-    const lines = bets.map(b =>
-      `${(b.creator as any)?.display_name ?? "anon"} — ${b.amount_usdc} USDC on ${b.creator_side} (${(b.match as any)?.home_team} vs ${(b.match as any)?.away_team})`)
-      .join("\n");
-    await tgSend(chatId, `open bets:\n\n${lines}\n\nopen the app to accept`);
+    const lines = bets.map(b => {
+      const m    = b.match as any;
+      const name = (b.creator as any)?.display_name ?? "anon";
+      const team = teamName(b.creator_side, m?.home_team, m?.away_team);
+      return name + " is betting " + b.amount_usdc + " USDC on " + team + " \u2014 open the app to take it";
+    }).join("\n\n");
+
+    await tgSend(chatId, "open bets:\n\n" + lines);
+    return;
+  }
+
+  // ── /mybets — your personal active bets ─────────────────────────────────────
+  if (command === "/mybets") {
+    const { data: user } = await db.from("users").select("id").eq("telegram_id", fromId).single();
+    if (!user) {
+      await tgSend(chatId, "you haven't linked your wallet yet.\n\nopen the app > Settings > Link Telegram, then send me /link <code>");
+      return;
+    }
+
+    const { data: bets } = await db.from("bets")
+      .select("status, amount_usdc, creator_side, creator_id, match:matches(home_team,away_team,status), counterparty:users!bets_counterparty_id_fkey(display_name)")
+      .or("creator_id.eq." + user.id + ",counterparty_id.eq." + user.id)
+      .in("status", ["challenged", "locked", "live"])
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (!bets?.length) {
+      await tgSend(chatId, "you don't have any active bets.\n\ntype /bets to see what's open, or create one in the app.");
+      return;
+    }
+
+    const lines = bets.map(b => {
+      const m      = b.match as any;
+      const cp     = (b.counterparty as any)?.display_name ?? "waiting for opponent";
+      const team   = teamName(b.creator_side, m?.home_team, m?.away_team);
+      const isCreator = b.creator_id === user.id;
+      const emoji  = b.status === "challenged" ? "\u23F3" : b.status === "locked" ? "\u2694\uFE0F" : "\u{1F525}";
+      const status = b.status === "challenged" ? "waiting for someone to accept" : "vs " + cp;
+      return emoji + " " + b.amount_usdc + " USDC on " + team + " (" + m?.home_team + " vs " + m?.away_team + ") \u2014 " + status;
+    }).join("\n\n");
+
+    await tgSend(chatId, "your bets:\n\n" + lines);
     return;
   }
 });
+
 
 export { router as telegramRouter };
