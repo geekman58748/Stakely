@@ -5,7 +5,7 @@ import { notifySettlement, notifyLosing, notifyMatchSoon } from "./telegram.js";
 const POLL_MS       = 3 * 60 * 1000;   // poll every 3 min
 const ROAST_COOL_MS = 15 * 60 * 1000;  // max one roast per bet per 15 min
 const lastRoasted   = new Map<string, number>();
-const pingedSoon    = new Set<string>(); // match IDs already pinged — resets on redeploy (fine)
+// pinged_soon state is persisted in the matches table — survives redeployments
 
 const FINISH_STATES = new Set(["finished", "FT", "AET", "PEN", "Ended", "ended"]);
 
@@ -162,18 +162,19 @@ async function roastLosers(
 async function pingUpcomingMatches() {
   try {
     const now    = Date.now();
-    const lo     = new Date(now + 30 * 60 * 1000).toISOString(); // 30 min from now
-    const hi     = new Date(now + 45 * 60 * 1000).toISOString(); // 45 min from now
+    const lo     = new Date(now + 15 * 60 * 1000).toISOString(); // 15 min from now
+    const hi     = new Date(now + 90 * 60 * 1000).toISOString(); // 90 min from now
 
     const { data: upcoming } = await db.from("matches")
-      .select("id,home_team,away_team,kickoff_at")
+      .select("id,home_team,away_team,kickoff_at,pinged_soon")
       .eq("status", "scheduled")
       .gte("kickoff_at", lo)
       .lte("kickoff_at", hi);
 
     if (!upcoming?.length) return;
 
-    const unpinged = upcoming.filter(m => !pingedSoon.has(m.id));
+    // Filter out matches already pinged — DB-persisted, survives redeploys
+    const unpinged = (upcoming ?? []).filter((m: any) => !m.pinged_soon);
     if (!unpinged.length) return;
 
     // Get all users with linked Telegram
@@ -184,7 +185,8 @@ async function pingUpcomingMatches() {
     if (!users?.length) return;
 
     for (const match of unpinged) {
-      pingedSoon.add(match.id);
+      // Mark as pinged in DB immediately (before sending) to prevent race on redeploy
+      await db.from("matches").update({ pinged_soon: true }).eq("id", match.id);
       const minsUntil = Math.round((new Date(match.kickoff_at).getTime() - now) / 60000);
       await Promise.all(
         users
