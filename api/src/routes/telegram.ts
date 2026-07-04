@@ -129,29 +129,32 @@ router.post("/webhook", async (req, res) => {
     return;
   }
 
-  // ── /scores ─────────────────────────────────────────────────────────────────
+  // ── /scores ─────────────────────────────────────────────────────────────────────────────
   if (command === "/scores") {
-    try {
-      const scores = await txline.getLiveScores();
-      if (!scores.length) {
-        await tgSend(chatId, "no live matches rn. check back when a game's on");
-        return;
-      }
-      const lines = scores.map(s =>
-        `${s.fixtureId} | ${s.homeScore}–${s.awayScore} (${s.minute ?? "?"}')`)
-        .join("\n");
-      await tgSend(chatId, `live scores:\n\n${lines}`);
-    } catch {
-      // Fall back to Supabase cached matches
-      const { data } = await db.from("matches").select("home_team,away_team,home_score,away_score,status").eq("status", "live");
-      if (!data?.length) { await tgSend(chatId, "no live matches rn"); return; }
-      const lines = data.map(m => `${m.home_team} ${m.home_score ?? 0}–${m.away_score ?? 0} ${m.away_team}`).join("\n");
-      await tgSend(chatId, `live scores:\n\n${lines}`);
+    const { data: liveMatches } = await db.from("matches")
+      .select("id,home_team,away_team,home_score,away_score")
+      .in("status", ["live", "halftime"])
+      .order("kickoff_at", { ascending: true });
+
+    if (!liveMatches?.length) {
+      await tgSend(chatId, "no live matches rn. check back when a game's on");
+      return;
     }
+
+    // Fresh per-fixture score from TxLINE; fall back to cached on error
+    const lines = await Promise.all(liveMatches.map(async (m) => {
+      try {
+        const s = await txline.getScore(m.id);
+        return m.home_team + " " + s.homeScore + "–" + s.awayScore + " " + m.away_team + (s.minute ? " (" + s.minute + "')" : "");
+      } catch {
+        return m.home_team + " " + (m.home_score ?? 0) + "–" + (m.away_score ?? 0) + " " + m.away_team;
+      }
+    }));
+    await tgSend(chatId, "live scores:\n\n" + lines.join("\n"));
     return;
   }
 
-  // ── /bets ───────────────────────────────────────────────────────────────────
+    // ── /bets ───────────────────────────────────────────────────────────────────
   if (command === "/bets") {
     const { data: user } = await db.from("users").select("id").eq("telegram_id", fromId).single();
     if (!user) {
