@@ -220,3 +220,16 @@ create policy "read_bets" on bets for select using (
 
 -- Service role bypass (your API server uses service role key — bypasses RLS)
 -- All writes go through your Express API server with the service role key, not from the client directly.
+
+-- ─────────────────────────────────────────────
+-- STREAK FUNCTIONS
+-- ─────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION increment_streak_win(user_id uuid)
+RETURNS void LANGUAGE sql AS $$
+  UPDATE users SET streak = streak + 1, total_wins = total_wins + 1, updated_at = now() WHERE id = user_id;
+$$;
+
+CREATE OR REPLACE FUNCTION reset_streak_loss(user_id uuid)
+RETURNS void LANGUAGE sql AS $$
+  UPDATE users SET streak = 0, total_losses = total_losses + 1, updated_at = now() WHERE id = user_id;
+$$;
