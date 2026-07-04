@@ -162,13 +162,11 @@ async function roastLosers(
 async function pingUpcomingMatches() {
   try {
     const now    = Date.now();
-    const lo     = new Date(now + 15 * 60 * 1000).toISOString(); // 15 min from now
     const hi     = new Date(now + 90 * 60 * 1000).toISOString(); // 90 min from now
 
     const { data: upcoming } = await db.from("matches")
       .select("id,home_team,away_team,kickoff_at,pinged_soon")
       .eq("status", "scheduled")
-      .gte("kickoff_at", lo)
       .lte("kickoff_at", hi);
 
     if (!upcoming?.length) return;
