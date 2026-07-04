@@ -7,7 +7,13 @@ const router = Router();
 /** Seed / refresh matches from TxLINE into Supabase */
 async function syncFixtures() {
   const fixtures = await txline.getFixtures();
-  const rows = fixtures.map(f => ({
+  // Guard: only accept fixtures with numeric IDs (real TxLINE IDs are numeric strings)
+  // This prevents mock fixtures (wc_001 etc.) from ever entering the DB
+  const realFixtures = fixtures.filter(f => /^\d+$/.test(f.id));
+  if (realFixtures.length !== fixtures.length) {
+    console.warn('[syncFixtures] filtered out', fixtures.length - realFixtures.length, 'non-numeric fixture IDs');
+  }
+  const rows = realFixtures.map(f => ({
     id: f.id,
     home_team: f.homeTeam,
     away_team: f.awayTeam,
@@ -18,7 +24,7 @@ async function syncFixtures() {
   }));
   const { error } = await db.from("matches").upsert(rows, { onConflict: "id" });
   if (error) console.error("[syncFixtures]", error.message);
-  return rows.length;
+  return realFixtures.length;
 }
 
 /** GET /matches — list upcoming + live matches */
