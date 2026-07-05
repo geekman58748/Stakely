@@ -10,8 +10,43 @@ const lastRoasted   = new Map<string, number>();
 const FINISH_STATES = new Set(["finished", "FT", "AET", "PEN", "Ended", "ended"]);
 
 // ── Main tick ─────────────────────────────────────────────────────────────────
+// Map TxLINE GameState to our status
+function mapGameState(gs: string): string {
+  const s = (gs ?? "").toLowerCase();
+  if (["1h","2h","live","inprogress","in_progress","in progress"].some(x => s.includes(x))) return "live";
+  if (["ht","halftime","half_time","half time"].some(x => s.includes(x))) return "halftime";
+  if (["ft","aet","pen","finished","ended","full time","fulltime"].some(x => s.includes(x))) return "finished";
+  if (["postponed","cancelled","abandoned"].some(x => s.includes(x))) return "postponed";
+  return "scheduled";
+}
+
 async function tick() {
   try {
+    // Auto-transition: matches past kickoff still "scheduled" — check TxLINE for real status
+    const nowTs = new Date().toISOString();
+    const { data: staleScheduled } = await db.from("matches")
+      .select("id")
+      .eq("status", "scheduled")
+      .lt("kickoff_at", nowTs);
+
+    if (staleScheduled?.length) {
+      await Promise.all(staleScheduled.map(async (m) => {
+        try {
+          const score = await txline.getScore(m.id);
+          const newStatus = mapGameState(score.status);
+          if (newStatus !== "scheduled") {
+            await db.from("matches").update({
+              status:     newStatus,
+              home_score: score.homeScore,
+              away_score: score.awayScore,
+              updated_at: new Date().toISOString(),
+            }).eq("id", m.id);
+            console.log("[poller] status update:", m.id, "->", newStatus);
+          }
+        } catch { /* TxLINE may not have data yet — skip */ }
+      }));
+    }
+
     const { data: liveMatches } = await db
       .from("matches")
       .select("id,home_team,away_team,status,home_score,away_score")
@@ -162,11 +197,13 @@ async function roastLosers(
 async function pingUpcomingMatches() {
   try {
     const now    = Date.now();
+    const nowIso = new Date(now).toISOString();
     const hi     = new Date(now + 90 * 60 * 1000).toISOString(); // 90 min from now
 
     const { data: upcoming } = await db.from("matches")
       .select("id,home_team,away_team,kickoff_at,pinged_soon")
       .eq("status", "scheduled")
+      .gte("kickoff_at", nowIso)
       .lte("kickoff_at", hi);
 
     if (!upcoming?.length) return;
