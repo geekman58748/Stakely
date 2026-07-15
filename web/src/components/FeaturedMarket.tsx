@@ -1,62 +1,70 @@
 import { Clock3, ShieldCheck, Trophy, UsersRound } from "lucide-react";
+import type { Bet, Match } from "../lib/api";
+import { flagForTeam, formatFixtureTime, formatOdds, impliedChance, teamCode, timeToKickoff } from "../lib/discoverView";
 
-export function FeaturedMarket() {
+export function FeaturedMarket({ match, bets, loading, txlineReal }: { match: Match | null; bets: Bet[]; loading: boolean; txlineReal: boolean }) {
+  const home = match?.home_team ?? (loading ? "Loading fixture" : "No fixture");
+  const away = match?.away_team ?? "Feed syncing";
+  const homeOdds = match?.odds?.homeOdds ?? match?.home_odds ?? null;
+  const drawOdds = match?.odds?.drawOdds ?? match?.draw_odds ?? null;
+  const awayOdds = match?.odds?.awayOdds ?? match?.away_odds ?? null;
+  const matchBets = match ? bets.filter((bet) => bet.match_id === match.id) : [];
+  const openVolume = matchBets.reduce((sum, bet) => sum + Number(bet.amount_usdc || 0) * 2, 0);
+  const href = match ? `#match/${encodeURIComponent(match.id)}` : "#matches";
+
   return (
-    <section className="featured-market" aria-label="Brazil versus France World Cup market">
+    <section className={`featured-market ${loading ? "is-loading" : ""}`} aria-label={match ? `${home} versus ${away} World Cup market` : "TxLINE fixture market"}>
       <div className="hero-reference-art" aria-hidden="true" />
       <div className="hero-shade" aria-hidden="true" />
 
       <div className="featured-copy">
         <span className="gold-label">World Cup 2026</span>
         <h2>
-          <span className="flag flag-brazil">🇧🇷</span>
-          <strong>Brazil vs France</strong>
-          <span className="flag flag-france">🇫🇷</span>
-          <small>FRA</small>
+          <span className="flag">{flagForTeam(home, teamCode(home, match?.home_team_code))}</span>
+          <strong>{home} vs {away}</strong>
+          <span className="flag flag-france">{flagForTeam(away, teamCode(away, match?.away_team_code))}</span>
+          <small>{teamCode(away, match?.away_team_code)}</small>
         </h2>
-        <p className="match-meta">Quarter Final&nbsp; · &nbsp;Jul 12, 2026&nbsp; · &nbsp;4:00 PM UTC</p>
+        <p className="match-meta">{match ? `${formatFixtureTime(match.kickoff_at)}  ·  ${fixtureState(match)}` : "Waiting for the TxLINE fixture feed"}</p>
         <p className="question">Who will win this match?</p>
 
         <div className="featured-options">
-          <button className="outcome-card green" type="button">
+          <a className="outcome-card green" href={href}>
             <span className="kit green-kit"><i /></span>
             <span className="outcome-copy">
-              <small>Brazil</small>
-              <strong>62%</strong>
-              <em>▲ 1.62</em>
+              <small>{home}</small>
+              <strong>{impliedChance(homeOdds, drawOdds, awayOdds)}</strong>
+              <em>{formatOdds(homeOdds)}</em>
             </span>
-          </button>
+          </a>
           <span className="versus-badge">VS</span>
-          <button className="outcome-card blue" type="button">
+          <a className="outcome-card blue" href={href}>
             <span className="outcome-copy">
-              <small>France</small>
-              <strong>38%</strong>
-              <em>▼ 2.63</em>
+              <small>{away}</small>
+              <strong>{impliedChance(awayOdds, drawOdds, homeOdds)}</strong>
+              <em>{formatOdds(awayOdds)}</em>
             </span>
             <span className="kit blue-kit"><i /></span>
-          </button>
+          </a>
         </div>
 
         <div className="featured-footer">
           <AvatarStack />
-          <span>1.2K</span>
+          <span>{matchBets.length} open</span>
           <span className="divider" />
-          <span>$248,390 Vol.</span>
+          <span>{openVolume.toFixed(2)} USDC</span>
           <span className="spacer" />
           <Clock3 size={15} />
-          <span>2d 14h 32m</span>
+          <span>{match ? timeToKickoff(match) : "Syncing"}</span>
         </div>
       </div>
 
       <div className="featured-action">
-        <button className="primary-action" type="button">
+        <a className="primary-action" href={href}>
           <UsersRound size={19} fill="currentColor" />
-          Create Challenge
-        </button>
-        <span>
-          <ShieldCheck size={16} />
-          TxLINE Verified
-        </span>
+          {matchBets.length ? "View Challenges" : "Create Challenge"}
+        </a>
+        <span><ShieldCheck size={16} />{txlineReal ? "TxLINE Live Feed" : "TxLINE Feed"}</span>
       </div>
 
       <Trophy className="hero-trophy-fallback" size={170} strokeWidth={1.1} aria-hidden="true" />
@@ -67,9 +75,13 @@ export function FeaturedMarket() {
 export function AvatarStack({ tiny = false }: { tiny?: boolean }) {
   return (
     <span className={`avatar-stack ${tiny ? "tiny" : ""}`} aria-label="Participants">
-      <i className="avatar-one">AO</i>
-      <i className="avatar-two">MK</i>
-      <i className="avatar-three">JR</i>
+      <i className="avatar-one">AO</i><i className="avatar-two">MK</i><i className="avatar-three">JR</i>
     </span>
   );
+}
+
+function fixtureState(match: Match) {
+  if (["live", "halftime"].includes(match.status)) return `${match.home_score} - ${match.away_score} live`;
+  if (match.status === "finished") return `Final ${match.home_score} - ${match.away_score}`;
+  return "Scheduled";
 }

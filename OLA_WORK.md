@@ -28,7 +28,7 @@ The Stakely escrow program is deployed on Solana devnet:
 - **Explorer:** https://explorer.solana.com/address/J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai?cluster=devnet
 - **TxLINE validation program:** `6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J`
 
-The current production API is still the older deployment. The new frontend intentionally disables challenge creation until `/api/health` confirms that the escrow-verification contract is live.
+The current production API is still the older deployment. The new frontend intentionally disables challenge creation and acceptance until `/api/health` confirms that the escrow-verification contract is live.
 
 ## What Ola Has Built
 
@@ -36,10 +36,10 @@ The current production API is still the older deployment. The new frontend inten
 
 | Route | Page | Status | Data source |
 | --- | --- | --- | --- |
-| `/#discover` | Discover | Pixel-focused approved design | Showcase data is hardcoded |
+| `/#discover` | Discover | Functional approved design | Real TxLINE fixtures and `GET /api/bets/open` |
 | `/#leaderboard` | Leaderboard | Pixel-focused approved design | Showcase data is hardcoded |
 | `/#matches` | Matches | Functional | Real `GET /api/matches` |
-| `/#match/:id` | Match detail | Functional | Real match, odds, open bets, wallet, and escrow flow |
+| `/#match/:id` | Match detail | Functional | Real match, odds, open bets, create/accept wallet, and escrow flow |
 | `/#my-bets` | My Bets | Functional | Real wallet-authenticated `GET /api/bets?role=mine` |
 | `/#receipts/:id?` | Settlement Receipts | Functional | Derived from settled wallet bets, TxLINE proof, and Solana transaction fields |
 
@@ -47,9 +47,12 @@ The current production API is still the older deployment. The new frontend inten
 
 - Real API health and capability checks.
 - Real fixture loading, filters, loading states, empty states, and errors.
+- Approved Discover composition mapped to live TxLINE fixtures and published open challenges.
 - Phantom/Solflare injected wallet connection.
 - Devnet escrow PDA derivation and Anchor instruction construction.
 - Create-challenge transaction followed by API publication.
+- Second-wallet challenge acceptance, on-chain funding, and API confirmation.
+- Canonical Supabase UUIDs are compacted to 32 characters only for Solana PDA seeds, avoiding the chain's seed-length limit while preserving database IDs.
 - My Bets filters for open, locked/live, settled, and cancelled records.
 - Proof-aware receipts that only show `Verified` when both the TxLINE proof and settlement transaction are present.
 - Receipt deep links, Solana Explorer references, copy controls, and clear incomplete legacy states.
@@ -204,11 +207,11 @@ Ola is unblocked for the complete UI when all of these are true:
 
 While Maxx completes the P0 backend work, Ola can continue without waiting on visual implementation:
 
-- Connect Discover to real matches and challenges while preserving the approved design exactly.
-- Build the Accept Challenge interaction after the accept contract is confirmed.
 - Connect Leaderboard to settled user records when that data is reliable.
 - Adapt the stable web flow into the Telegram Mini App viewport and Telegram SDK.
 - Polish mobile, loading, empty, error, wallet-rejection, and transaction-pending states.
+
+Discover and the two-wallet Accept Challenge path are implemented on this branch. Their real transaction controls remain safely gated until Maxx deploys the new Railway capability response.
 
 ## Coordination Rule
 

@@ -23,6 +23,12 @@ function accountDiscriminator(name: string) {
   return createHash("sha256").update(`account:${name}`).digest().subarray(0, 8);
 }
 
+export function onchainBetId(betId: string) {
+  const compactId = betId.replaceAll("-", "");
+  if (Buffer.byteLength(compactId) > 32) throw new Error("Bet ID is too long for a Solana escrow seed");
+  return compactId;
+}
+
 function decodeEscrow(data: Buffer): EscrowState {
   const expected = accountDiscriminator("EscrowState");
   if (!data.subarray(0, 8).equals(expected)) throw new Error("Invalid Stakely escrow account");
@@ -61,9 +67,10 @@ export async function verifyCreatedEscrow(input: {
   creatorSide: string;
 }) {
   await requireConfirmedSignature(input.signature);
+  const escrowBetId = onchainBetId(input.betId);
 
   const [expectedPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("escrow"), Buffer.from(input.betId)],
+    [Buffer.from("escrow"), Buffer.from(escrowBetId)],
     PROGRAM_ID,
   );
   const suppliedPda = new PublicKey(input.escrowPda);
@@ -74,7 +81,7 @@ export async function verifyCreatedEscrow(input: {
 
   const state = decodeEscrow(account.data);
   const expectedAmount = BigInt(Math.round(input.amountUsdc * 1_000_000));
-  if (state.betId !== input.betId) throw new Error("On-chain bet ID does not match");
+  if (state.betId !== escrowBetId) throw new Error("On-chain bet ID does not match");
   if (state.creator.toBase58() !== input.creatorWallet) throw new Error("Wallet does not own this escrow");
   if (state.amount !== expectedAmount) throw new Error("On-chain stake does not match the challenge");
   if (state.creatorSide !== sideNumbers[input.creatorSide]) throw new Error("On-chain outcome does not match the challenge");
@@ -89,8 +96,9 @@ export async function verifyAcceptedEscrow(input: {
   amountUsdc: number;
 }) {
   await requireConfirmedSignature(input.signature);
+  const escrowBetId = onchainBetId(input.betId);
   const [expectedPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("escrow"), Buffer.from(input.betId)],
+    [Buffer.from("escrow"), Buffer.from(escrowBetId)],
     PROGRAM_ID,
   );
   const suppliedPda = new PublicKey(input.escrowPda);
@@ -100,7 +108,7 @@ export async function verifyAcceptedEscrow(input: {
   if (!account || !account.owner.equals(PROGRAM_ID)) throw new Error("Stakely escrow account was not found");
   const state = decodeEscrow(account.data);
   const expectedAmount = BigInt(Math.round(input.amountUsdc * 1_000_000));
-  if (state.betId !== input.betId || state.amount !== expectedAmount) throw new Error("On-chain escrow terms do not match");
+  if (state.betId !== escrowBetId || state.amount !== expectedAmount) throw new Error("On-chain escrow terms do not match");
   if (state.counterparty.toBase58() !== input.counterpartyWallet) throw new Error("Wallet did not fund this escrow");
   if (state.status !== 1) throw new Error("Escrow has not been funded by both sides");
 }

@@ -139,4 +139,9 @@ export const stakelyApi = {
     auth,
     body: JSON.stringify(payload),
   }),
+  acceptBet: (auth: AuthHeaders, betId: string, acceptTx: string) => request<Bet>(`/api/bets/${encodeURIComponent(betId)}/accept`, {
+    method: "PATCH",
+    auth,
+    body: JSON.stringify({ accept_tx: acceptTx }),
+  }),
 };

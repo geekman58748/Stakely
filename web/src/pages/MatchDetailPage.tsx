@@ -14,14 +14,16 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "../components/AppShell";
+import { previewBets } from "../data/previewBets";
 import { stakelyApi, type Bet, type BetSide, type Match } from "../lib/api";
-import { createEscrowChallenge, ESCROW_PROGRAM_ID, getEscrowProgramStatus } from "../lib/escrow";
+import { acceptEscrowChallenge, createEscrowChallenge, ESCROW_PROGRAM_ID, getEscrowProgramStatus } from "../lib/escrow";
 import { useWallet } from "../providers/WalletProvider";
 
 type SubmitState = "idle" | "wallet" | "funding" | "syncing" | "done";
 
 export function MatchDetailPage({ matchId }: { matchId: string }) {
   const wallet = useWallet();
+  const preview = useMemo(() => import.meta.env.DEV && new URLSearchParams(window.location.search).get("preview") === "1", []);
   const [match, setMatch] = useState<Match | null>(null);
   const [openBets, setOpenBets] = useState<Bet[]>([]);
   const [programReady, setProgramReady] = useState<boolean | null>(null);
@@ -33,10 +35,29 @@ export function MatchDetailPage({ matchId }: { matchId: string }) {
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [createdBet, setCreatedBet] = useState<Bet | null>(null);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [acceptState, setAcceptState] = useState<SubmitState>("idle");
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+  const [acceptedBet, setAcceptedBet] = useState<Bet | null>(null);
+  const [pendingAccept, setPendingAccept] = useState<{ betId: string; signature: string } | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
+    if (preview) {
+      const previewMatch = previewBets.find((bet) => bet.match_id === matchId)?.match;
+      if (!previewMatch) {
+        setError("This fixture is not included in the UI preview.");
+        setLoading(false);
+        return;
+      }
+      setMatch(previewMatch);
+      setOpenBets(previewBets.filter((bet) => bet.match_id === matchId && bet.status === "challenged"));
+      setProgramReady(true);
+      setApiReady(true);
+      setLoading(false);
+      return;
+    }
     try {
       const [matchData, betsData, program, health] = await Promise.all([
         stakelyApi.match(matchId, signal),
@@ -53,7 +74,7 @@ export function MatchDetailPage({ matchId }: { matchId: string }) {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [matchId]);
+  }, [matchId, preview]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -68,7 +89,7 @@ export function MatchDetailPage({ matchId }: { matchId: string }) {
   ] : [], [match]);
 
   const createChallenge = async () => {
-    if (!match || submitState !== "idle") return;
+    if (!match || submitState !== "idle" || preview) return;
     setSubmitError(null);
     setCreatedBet(null);
     try {
@@ -106,6 +127,61 @@ export function MatchDetailPage({ matchId }: { matchId: string }) {
     } catch (challengeError) {
       setSubmitState("idle");
       setSubmitError(challengeError instanceof Error ? challengeError.message : "Challenge creation failed.");
+    }
+  };
+
+  const acceptChallenge = async (bet: Bet) => {
+    if (acceptState !== "idle" || !programReady || !apiReady) return;
+    setAcceptingId(bet.id);
+    setAcceptError(null);
+    setAcceptedBet(null);
+
+    if (preview) {
+      setAcceptedBet({ ...bet, status: "locked", accept_tx: "preview-only" });
+      setOpenBets((current) => current.filter((item) => item.id !== bet.id));
+      setAcceptState("idle");
+      setAcceptingId(null);
+      return;
+    }
+
+    let acceptTx = pendingAccept?.betId === bet.id ? pendingAccept.signature : null;
+    try {
+      if (wallet.publicKey?.toBase58() === bet.creator?.wallet_address) throw new Error("You cannot accept your own challenge.");
+      if (!wallet.connected || !wallet.wallet || !wallet.publicKey) {
+        setAcceptState("wallet");
+        await wallet.connect();
+        setAcceptState("idle");
+        return;
+      }
+      if (!bet.escrow_pda) throw new Error("This challenge is missing its escrow address.");
+
+      if (!acceptTx) {
+        setAcceptState("funding");
+        const escrow = await acceptEscrowChallenge({
+          wallet: wallet.wallet,
+          publicKey: wallet.publicKey,
+          betId: bet.id,
+          amountUsdc: Number(bet.amount_usdc),
+          escrowPda: bet.escrow_pda,
+        });
+        acceptTx = escrow.signature;
+        setPendingAccept({ betId: bet.id, signature: escrow.signature });
+      }
+
+      setAcceptState("syncing");
+      const auth = await wallet.getAuthHeaders();
+      await stakelyApi.registerUser(auth);
+      const accepted = await stakelyApi.acceptBet(auth, bet.id, acceptTx);
+      setAcceptedBet(accepted);
+      setOpenBets((current) => current.filter((item) => item.id !== bet.id));
+      setPendingAccept(null);
+      setAcceptState("idle");
+    } catch (acceptFailure) {
+      setAcceptState("idle");
+      const message = acceptFailure instanceof Error ? acceptFailure.message : "Challenge acceptance failed.";
+      setAcceptError(acceptTx ? `Funds are locked on-chain, but API sync failed: ${message} Use Retry sync; no second transaction will be sent.` : message);
+    } finally {
+      setAcceptingId(null);
     }
   };
 
@@ -176,17 +252,31 @@ export function MatchDetailPage({ matchId }: { matchId: string }) {
             {submitError ? <p className="challenge-error" role="alert">{submitError}</p> : null}
             {createdBet ? <div className="challenge-success"><CheckCircle2 size={20} /><span><strong>Challenge funded</strong><small>Waiting for an opponent to match your stake.</small></span></div> : null}
 
-            <button className="challenge-submit" disabled={closed || !programReady || !apiReady || submitState === "funding" || submitState === "syncing" || submitState === "done"} onClick={createChallenge} type="button">
-              {wallet.connected ? <LockKeyhole size={18} /> : <Wallet size={18} />}{submitLabel(submitState, wallet.connected, closed, apiReady)}
+            <button className="challenge-submit" disabled={preview || closed || !programReady || !apiReady || submitState === "funding" || submitState === "syncing" || submitState === "done"} onClick={createChallenge} type="button">
+              {wallet.connected ? <LockKeyhole size={18} /> : <Wallet size={18} />}{submitLabel(submitState, wallet.connected, closed, apiReady, preview)}
             </button>
             <p className="challenge-note">The challenge is published only after the escrow transaction confirms on devnet.</p>
           </section>
 
           <section className="open-challenges">
             <header><div><h2>Open challenges</h2><p>Funded offers waiting for an opponent.</p></div><span>{openBets.length}</span></header>
+            {acceptError ? <p className="challenge-error accept-error" role="alert">{acceptError}</p> : null}
+            {acceptedBet ? <div className="challenge-success accept-success"><CheckCircle2 size={20} /><span><strong>{preview ? "Preview challenge matched" : "Challenge matched and locked"}</strong><small>{preview ? "No transaction was sent in UI preview mode." : "Both stakes are now funded in the same devnet vault."}</small></span></div> : null}
             {openBets.length === 0 ? (
-              <div className="empty-challenges"><Swords size={28} /><strong>No funded challenges yet</strong><p>Be the first person to open one for this match.</p></div>
-            ) : openBets.map((bet) => <OpenChallenge key={bet.id} bet={bet} match={match} />)}
+              <div className="empty-challenges"><Swords size={28} /><strong>{acceptedBet ? "Challenge moved to My Bets" : "No funded challenges yet"}</strong><p>{acceptedBet ? "The matched escrow is now waiting for the fixture result." : "Be the first person to open one for this match."}</p></div>
+            ) : openBets.map((bet) => <OpenChallenge
+              apiReady={apiReady}
+              bet={bet}
+              key={bet.id}
+              match={match}
+              onAccept={acceptChallenge}
+              ownChallenge={wallet.publicKey?.toBase58() === bet.creator?.wallet_address}
+              phase={acceptingId === bet.id ? acceptState : "idle"}
+              pendingSync={pendingAccept?.betId === bet.id}
+              preview={preview}
+              programReady={programReady}
+              walletConnected={wallet.connected}
+            />)}
           </section>
         </div>
 
@@ -208,7 +298,18 @@ function MatchTeam({ name, code }: { name: string; code: string | null }) {
   return <span className="match-hero-team"><b>{displayCode}</b><strong>{name}</strong></span>;
 }
 
-function OpenChallenge({ bet, match }: { bet: Bet; match: Match }) {
+function OpenChallenge({ bet, match, phase, onAccept, ownChallenge, apiReady, programReady, walletConnected, preview, pendingSync }: {
+  bet: Bet;
+  match: Match;
+  phase: SubmitState;
+  onAccept: (bet: Bet) => Promise<void>;
+  ownChallenge: boolean;
+  apiReady: boolean | null;
+  programReady: boolean | null;
+  walletConnected: boolean;
+  preview: boolean;
+  pendingSync: boolean;
+}) {
   const label = bet.creator_side === "draw" ? "Draw" : bet.creator_side === "home" ? match.home_team : match.away_team;
   const creator = bet.creator?.display_name || `${bet.creator?.wallet_address?.slice(0, 4) ?? "Anon"}...${bet.creator?.wallet_address?.slice(-4) ?? ""}`;
   return (
@@ -217,12 +318,13 @@ function OpenChallenge({ bet, match }: { bet: Bet; match: Match }) {
       <span><strong>{creator}</strong><small>{bet.creator?.streak ?? 0} win streak</small></span>
       <span><small>Picked</small><strong>{label}</strong></span>
       <span><small>Stake</small><strong>{Number(bet.amount_usdc).toFixed(2)} USDC</strong></span>
-      <button type="button" disabled>Accept</button>
+      <button type="button" disabled={ownChallenge || !apiReady || !programReady || ["funding", "syncing", "done"].includes(phase)} onClick={() => void onAccept(bet)}>{acceptLabel({ phase, ownChallenge, apiReady, programReady, walletConnected, preview, pendingSync })}</button>
     </article>
   );
 }
 
-function submitLabel(state: SubmitState, connected: boolean, closed: boolean, apiReady: boolean | null) {
+function submitLabel(state: SubmitState, connected: boolean, closed: boolean, apiReady: boolean | null, preview: boolean) {
+  if (preview) return "Preview only";
   if (closed) return "Challenges closed";
   if (apiReady === false) return "Backend update pending";
   if (state === "wallet") return "Connecting wallet";
@@ -230,6 +332,19 @@ function submitLabel(state: SubmitState, connected: boolean, closed: boolean, ap
   if (state === "syncing") return "Publishing challenge";
   if (state === "done") return "Challenge live";
   return connected ? "Fund challenge" : "Connect wallet";
+}
+
+function acceptLabel(input: { phase: SubmitState; ownChallenge: boolean; apiReady: boolean | null; programReady: boolean | null; walletConnected: boolean; preview: boolean; pendingSync: boolean }) {
+  if (input.ownChallenge) return "Yours";
+  if (!input.apiReady) return "Backend pending";
+  if (!input.programReady) return "Program pending";
+  if (input.phase === "wallet") return "Connecting";
+  if (input.phase === "funding") return "Confirm wallet";
+  if (input.phase === "syncing") return "Locking";
+  if (input.phase === "done") return "Matched";
+  if (input.pendingSync) return "Retry sync";
+  if (input.preview) return "Accept preview";
+  return input.walletConnected ? "Accept" : "Connect";
 }
 
 function formatOdds(value: number | null | undefined) {

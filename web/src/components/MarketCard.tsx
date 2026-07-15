@@ -1,145 +1,111 @@
-import {
-  Box,
-  CheckCircle2,
-  CirclePlus,
-  ExternalLink,
-  Gamepad2,
-  ShieldCheck,
-  Trophy,
-  UsersRound,
-} from "lucide-react";
+import { Activity, Box, CheckCircle2, CirclePlus, ExternalLink, Gamepad2, ShieldCheck, Trophy, UsersRound } from "lucide-react";
+import type { Bet, Match } from "../lib/api";
+import { flagForTeam, formatFixtureTime, formatOdds, teamCode, timeToKickoff } from "../lib/discoverView";
 import { AvatarStack } from "./FeaturedMarket";
 
-export function DiscoverMarketGrid() {
+export function DiscoverMarketGrid({ matches, bets, loading }: { matches: Match[]; bets: Bet[]; loading: boolean }) {
+  const liveCount = matches.filter((match) => ["live", "halftime"].includes(match.status)).length;
+  const upcomingCount = matches.filter((match) => new Date(match.kickoff_at).getTime() >= Date.now() && !["finished", "cancelled", "postponed"].includes(match.status)).length;
+  const proofCount = matches.filter((match) => match.merkle_proof).length;
+  const openVolume = bets.reduce((sum, bet) => sum + Number(bet.amount_usdc || 0) * 2, 0);
+  const playable = matches.filter((match) => !["finished", "cancelled", "postponed"].includes(match.status));
+  const matchCards = (playable.length ? playable : matches).slice(0, 2);
+  const latestFinal = matches.find((match) => match.merkle_proof) ?? matches.find((match) => match.status === "finished") ?? null;
+  const firstChallenge = bets[0] ?? null;
+
   return (
-    <section className="market-grid" aria-label="Prediction markets and challenges">
+    <section className={`market-grid ${loading ? "is-loading" : ""}`} aria-label="Prediction markets and challenges">
       <article className="market-card winner-card">
-        <CardLabel tone="gold" icon={<Trophy size={13} />} label="Featured" />
+        <CardLabel tone="gold" icon={<Trophy size={13} />} label="Live Feed" />
         <div className="winner-orbit" aria-hidden="true"><span /></div>
-        <h3>World Cup Winner</h3>
-        <p>Who will win the World Cup?</p>
+        <h3>World Cup Markets</h3><p>TxLINE fixture coverage</p>
         <div className="option-list">
-          <MarketOption flag="🇧🇷" label="Brazil" value="28%" tone="green" />
-          <MarketOption flag="🇫🇷" label="France" value="18%" tone="blue" />
-          <MarketOption flag="🇦🇷" label="Argentina" value="14%" tone="blue" />
-          <MarketOption flag="🇪🇸" label="Spain" value="10%" tone="gold" />
-          <button className="all-outcomes" type="button">View all 32 outcomes <span>›</span></button>
+          <MarketOption label="Fixtures" value={`${matches.length}`} tone="blue" />
+          <MarketOption label="Live now" value={`${liveCount}`} tone="green" />
+          <MarketOption label="Upcoming" value={`${upcomingCount}`} tone="gold" />
+          <MarketOption label="Proofs stored" value={`${proofCount}`} tone="green" />
+          <a className="all-outcomes" href="#matches">View all fixtures <span>›</span></a>
         </div>
-        <CardFooter stat="2.4K" volume="$1.02M Vol." />
+        <CardFooter stat={`${bets.length}`} volume={`${openVolume.toFixed(2)} USDC open`} href="#matches" />
       </article>
 
-      <MatchCard
-        leftFlag="🇧🇷"
-        left="BRA"
-        rightFlag="🇫🇷"
-        right="FRA"
-        title="Brazil vs France"
-        oddsLeft="1.62"
-        oddsRight="2.63"
-        time="2d 14h"
-        stat="1.2K"
-        volume="$248K Vol."
-        greenLeft
-      />
-
-      <MatchCard
-        leftFlag="🇦🇷"
-        left="ARG"
-        rightFlag="🇪🇸"
-        right="ESP"
-        title="Argentina vs Spain"
-        oddsLeft="1.71"
-        oddsRight="2.45"
-        time="3d 09h"
-        stat="890"
-        volume="$186K Vol."
-      />
+      {matchCards.map((match, index) => <MatchCard bets={bets} greenLeft={index === 0} key={match.id} match={match} />)}
+      {matchCards.length < 2 ? Array.from({ length: 2 - matchCards.length }, (_, index) => <WaitingMatchCard key={`waiting-${index}`} />) : null}
 
       <article className="market-card challenge-card">
-        <CardLabel tone="purple" icon={<Gamepad2 size={13} />} label="Challenge" />
-        <h3>Open Friend Challenge</h3>
-        <p>Create your own market</p>
-        <div className="challenge-icon">
-          <UsersRound size={42} />
-          <span><CirclePlus size={21} /></span>
-        </div>
-        <p className="challenge-copy">Challenge friends with any<br />World Cup prediction</p>
-        <button className="primary-action full" type="button">Create Challenge</button>
-        <CardFooter stat="312" volume="Open" />
+        <CardLabel tone="purple" icon={<Gamepad2 size={13} />} label={firstChallenge ? "Funded" : "Challenge"} />
+        <h3>{firstChallenge ? "Open Friend Challenge" : "Start a Friend Challenge"}</h3>
+        <p>{firstChallenge?.match ? `${firstChallenge.match.home_team} vs ${firstChallenge.match.away_team}` : "Create your own market"}</p>
+        <div className="challenge-icon"><UsersRound size={42} /><span><CirclePlus size={21} /></span></div>
+        <p className="challenge-copy">{firstChallenge ? `${Number(firstChallenge.amount_usdc).toFixed(2)} USDC waiting to be matched` : "Pick a fixture and fund your side"}</p>
+        <a className="primary-action full" href={firstChallenge ? `#match/${encodeURIComponent(firstChallenge.match_id)}` : "#matches"}>{firstChallenge ? "Review Challenge" : "Create Challenge"}</a>
+        <CardFooter stat={`${bets.length}`} volume={bets.length === 1 ? "Open offer" : "Open offers"} href={firstChallenge ? `#match/${encodeURIComponent(firstChallenge.match_id)}` : "#matches"} />
       </article>
 
-      <article className="market-card settlement-card">
-        <span className="settlement-corner"><Box size={24} /></span>
-        <CardLabel tone="green" icon={<CheckCircle2 size={13} />} label="Settled" />
-        <h3>Portugal to Win</h3>
-        <p>Group Stage&nbsp; · &nbsp;Jun 22, 2026</p>
-        <div className="scoreline">
-          <span>POR <b>🇵🇹</b></span>
-          <strong>3 - 0</strong>
-          <span><b>🇲🇦</b> MAR</span>
-        </div>
-        <div className="market-settled-label">Market Settled</div>
-        <div className="settlement-row">
-          <span><small>Winner</small><i className="winner-avatar">A</i> @AlexPro</span>
-          <strong>+$1,250</strong>
-        </div>
-        <a className="receipt-link" href="#receipts">View Receipt <ExternalLink size={15} /></a>
-      </article>
+      <SettlementCard match={latestFinal} />
     </section>
   );
 }
 
-type MatchProps = {
-  leftFlag: string;
-  left: string;
-  rightFlag: string;
-  right: string;
-  title: string;
-  oddsLeft: string;
-  oddsRight: string;
-  time: string;
-  stat: string;
-  volume: string;
-  greenLeft?: boolean;
-};
-
-function MatchCard(props: MatchProps) {
+function MatchCard({ match, bets, greenLeft }: { match: Match; bets: Bet[]; greenLeft?: boolean }) {
+  const href = `#match/${encodeURIComponent(match.id)}`;
+  const homeOdds = match.odds?.homeOdds ?? match.home_odds;
+  const awayOdds = match.odds?.awayOdds ?? match.away_odds;
+  const matchBets = bets.filter((bet) => bet.match_id === match.id);
+  const volume = matchBets.reduce((sum, bet) => sum + Number(bet.amount_usdc || 0) * 2, 0);
   return (
     <article className="market-card match-card">
-      <CardLabel tone="neutral" icon={<Gamepad2 size={13} />} label="Match" />
-      <time>{props.time}</time>
-      <h3>{props.title}</h3>
-      <p>Quarter Final</p>
+      <CardLabel tone="neutral" icon={match.status === "live" ? <Activity size={13} /> : <Gamepad2 size={13} />} label={match.status === "live" ? "Live" : "Match"} />
+      <time>{timeToKickoff(match)}</time>
+      <h3>{match.home_team} vs {match.away_team}</h3><p>{formatFixtureTime(match.kickoff_at)}</p>
       <div className="team-pair">
-        <span>{props.left}<b>{props.leftFlag}</b></span>
-        <i>VS</i>
-        <span><b>{props.rightFlag}</b>{props.right}</span>
+        <span>{teamCode(match.home_team, match.home_team_code)}<b>{flagForTeam(match.home_team, teamCode(match.home_team, match.home_team_code))}</b></span>
+        <i>{["live", "halftime", "finished"].includes(match.status) ? `${match.home_score}-${match.away_score}` : "VS"}</i>
+        <span><b>{flagForTeam(match.away_team, teamCode(match.away_team, match.away_team_code))}</b>{teamCode(match.away_team, match.away_team_code)}</span>
       </div>
       <div className="market-question">Who will win?</div>
       <div className="mini-odds">
-        <button className={props.greenLeft ? "green" : "blue"} type="button"><span>{props.title.split(" vs ")[0]}</span><strong>{props.oddsLeft}</strong></button>
-        <button className="blue" type="button"><span>{props.title.split(" vs ")[1]}</span><strong>{props.oddsRight}</strong></button>
+        <a className={greenLeft ? "green" : "blue"} href={href}><span>{match.home_team}</span><strong>{formatOdds(homeOdds)}</strong></a>
+        <a className="blue" href={href}><span>{match.away_team}</span><strong>{formatOdds(awayOdds)}</strong></a>
       </div>
-      <CardFooter stat={props.stat} volume={props.volume} />
+      <CardFooter stat={`${matchBets.length}`} volume={`${volume.toFixed(2)} USDC`} href={href} />
     </article>
   );
 }
 
-function MarketOption({ flag, label, value, tone }: { flag: string; label: string; value: string; tone: string }) {
-  return <button type="button"><span><b>{flag}</b>{label}</span><strong className={`${tone}-text`}>{value}</strong></button>;
+function WaitingMatchCard() {
+  return <article className="market-card match-card waiting-card"><CardLabel tone="neutral" icon={<ShieldCheck size={13} />} label="Syncing" /><h3>Waiting for fixture</h3><p>TxLINE feed</p><div className="waiting-market"><Activity size={27} /><span>Next market will appear here</span></div><CardFooter stat="0" volume="No fixture" href="#matches" /></article>;
+}
+
+function SettlementCard({ match }: { match: Match | null }) {
+  const proof = Boolean(match?.merkle_proof);
+  const result = match?.result === "home" ? match.home_team : match?.result === "away" ? match.away_team : match?.result === "draw" ? "Draw" : "Pending proof";
+  return (
+    <article className={`market-card settlement-card ${proof ? "" : "pending"}`}>
+      <span className="settlement-corner"><Box size={24} /></span>
+      <CardLabel tone={proof ? "green" : "neutral"} icon={<CheckCircle2 size={13} />} label={proof ? "Proof" : "Final"} />
+      <h3>{match ? `${match.home_team} vs ${match.away_team}` : "Settlement Feed"}</h3>
+      <p>{match ? formatFixtureTime(match.kickoff_at) : "Waiting for a final result"}</p>
+      <div className="scoreline">
+        <span>{match ? teamCode(match.home_team, match.home_team_code) : "---"}<b>{match ? flagForTeam(match.home_team, "--") : "--"}</b></span>
+        <strong>{match ? `${match.home_score} - ${match.away_score}` : "--"}</strong>
+        <span><b>{match ? flagForTeam(match.away_team, "--") : "--"}</b>{match ? teamCode(match.away_team, match.away_team_code) : "---"}</span>
+      </div>
+      <div className="market-settled-label">{proof ? "TxLINE proof stored" : "Final received; proof pending"}</div>
+      <div className="settlement-row"><span><small>Result</small>{result}</span><strong>{proof ? "Verified" : "Pending"}</strong></div>
+      <a className="receipt-link" href={match ? `#match/${encodeURIComponent(match.id)}` : "#receipts"}>{proof ? "View Proof" : "View Match"} <ExternalLink size={15} /></a>
+    </article>
+  );
+}
+
+function MarketOption({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return <span className="feed-option"><span>{label}</span><strong className={`${tone}-text`}>{value}</strong></span>;
 }
 
 function CardLabel({ label, tone, icon }: { label: string; tone: string; icon: React.ReactNode }) {
   return <span className={`card-label ${tone}`}>{icon}{label}</span>;
 }
 
-function CardFooter({ stat, volume }: { stat: string; volume: string }) {
-  return (
-    <footer className="card-footer">
-      <AvatarStack tiny />
-      <span>{stat}</span>
-      <span className="divider" />
-      <span>{volume}</span>
-    </footer>
-  );
+function CardFooter({ stat, volume, href }: { stat: string; volume: string; href: string }) {
+  return <footer className="card-footer"><AvatarStack tiny /><span>{stat}</span><span className="divider" /><span>{volume}</span><a href={href} title="Open market" aria-label="Open market"><ExternalLink size={13} /></a></footer>;
 }

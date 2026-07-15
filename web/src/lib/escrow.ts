@@ -25,6 +25,12 @@ const sideNumbers: Record<BetSide, number> = { home: 0, draw: 1, away: 2 };
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
+function onchainBetId(betId: string) {
+  const compactId = betId.replaceAll("-", "");
+  if (new TextEncoder().encode(compactId).length > 32) throw new Error("This challenge ID is too long for a Solana escrow seed.");
+  return compactId;
+}
+
 export async function getEscrowProgramStatus() {
   const account = await connection.getAccountInfo(ESCROW_PROGRAM_ID);
   return { deployed: Boolean(account?.executable), programId: ESCROW_PROGRAM_ID.toBase58() };
@@ -63,7 +69,8 @@ export async function createEscrowChallenge(input: {
   };
   const provider = new AnchorProvider(connection, anchorWallet, { commitment: "confirmed" });
   const program = new Program(idl as Idl, provider);
-  const betSeed = new TextEncoder().encode(input.betId);
+  const escrowBetId = onchainBetId(input.betId);
+  const betSeed = new TextEncoder().encode(escrowBetId);
   const [escrow] = PublicKey.findProgramAddressSync(
     [new TextEncoder().encode("escrow"), betSeed],
     ESCROW_PROGRAM_ID,
@@ -75,7 +82,7 @@ export async function createEscrowChallenge(input: {
 
   const amount = new BN(Math.round(input.amountUsdc * 1_000_000));
   const signature = await program.methods
-    .createEscrow(input.betId, amount, sideNumbers[input.side])
+    .createEscrow(escrowBetId, amount, sideNumbers[input.side])
     .accounts({
       creator: input.publicKey,
       escrow,
@@ -85,6 +92,63 @@ export async function createEscrowChallenge(input: {
       tokenProgram: TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
       rent: SYSVAR_RENT_PUBKEY,
+    })
+    .rpc();
+
+  return { signature, escrowPda: escrow.toBase58(), vaultPda: vault.toBase58() };
+}
+
+export async function acceptEscrowChallenge(input: {
+  wallet: InjectedSolanaWallet;
+  publicKey: PublicKey;
+  betId: string;
+  amountUsdc: number;
+  escrowPda: string;
+}) {
+  const programAccount = await connection.getAccountInfo(ESCROW_PROGRAM_ID);
+  if (!programAccount?.executable) throw new Error("Stakely escrow is not deployed on devnet.");
+
+  const escrowBetId = onchainBetId(input.betId);
+  const betSeed = new TextEncoder().encode(escrowBetId);
+  const [escrow] = PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode("escrow"), betSeed],
+    ESCROW_PROGRAM_ID,
+  );
+  if (escrow.toBase58() !== input.escrowPda) throw new Error("This challenge does not match its on-chain escrow address.");
+  const [vault] = PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode("vault"), betSeed],
+    ESCROW_PROGRAM_ID,
+  );
+  const [counterpartyTokenAccount] = PublicKey.findProgramAddressSync(
+    [input.publicKey.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), DEVNET_USDC_MINT.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  );
+
+  let balance = 0;
+  try {
+    balance = Number((await connection.getTokenAccountBalance(counterpartyTokenAccount)).value.uiAmount ?? 0);
+  } catch {
+    throw new Error("This wallet needs devnet USDC before it can accept a challenge.");
+  }
+  if (balance < input.amountUsdc) {
+    throw new Error(`This wallet has ${balance.toFixed(2)} devnet USDC; ${input.amountUsdc.toFixed(2)} is required.`);
+  }
+
+  const anchorWallet = {
+    publicKey: input.publicKey,
+    signTransaction: <T extends Transaction | VersionedTransaction>(transaction: T) => input.wallet.signTransaction(transaction),
+    signAllTransactions: <T extends Transaction | VersionedTransaction>(transactions: T[]) => input.wallet.signAllTransactions(transactions),
+  };
+  const provider = new AnchorProvider(connection, anchorWallet, { commitment: "confirmed" });
+  const program = new Program(idl as Idl, provider);
+  const signature = await program.methods
+    .acceptEscrow(escrowBetId)
+    .accounts({
+      counterparty: input.publicKey,
+      escrow,
+      vault,
+      counterpartyTokenAccount,
+      tokenProgram: TOKEN_PROGRAM_ID,
     })
     .rpc();
 
