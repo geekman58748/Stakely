@@ -6,8 +6,9 @@ import {
   CircleGauge,
   Clock3,
   Gamepad2,
+  FileCheck2,
   LayoutGrid,
-  ReceiptText,
+  ListChecks,
   Search,
   ShieldCheck,
   Trophy,
@@ -27,9 +28,9 @@ type ShellProps = {
 const navItems: Array<{ page: AppPage; label: string; href: string; icon: typeof LayoutGrid }> = [
   { page: "discover", label: "Discover", href: "#discover", icon: LayoutGrid },
   { page: "matches", label: "Matches", href: "#matches", icon: Gamepad2 },
-  { page: "my-bets", label: "My Bets", href: "#my-bets", icon: ReceiptText },
+  { page: "my-bets", label: "My Bets", href: "#my-bets", icon: ListChecks },
   { page: "leaderboard", label: "Leaderboard", href: "#leaderboard", icon: BarChart3 },
-  { page: "receipts", label: "Receipts", href: "#receipts", icon: ReceiptText },
+  { page: "receipts", label: "Receipts", href: "#receipts", icon: FileCheck2 },
 ];
 
 export function AppShell({ activePage, children }: ShellProps) {

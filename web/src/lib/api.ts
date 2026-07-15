@@ -19,6 +19,8 @@ export type Match = {
   draw_odds: number | null;
   away_odds: number | null;
   merkle_proof: unknown | null;
+  merkle_stored_at?: string | null;
+  updated_at?: string;
   odds?: {
     homeOdds: number | null;
     drawOdds: number | null;
@@ -36,12 +38,22 @@ export type UserSummary = {
 export type Bet = {
   id: string;
   match_id: string;
+  creator_id?: string;
+  counterparty_id?: string | null;
   creator_side: BetSide;
   amount_usdc: number;
   status: string;
   escrow_pda: string | null;
   create_tx: string | null;
+  accept_tx?: string | null;
+  settle_tx?: string | null;
+  winner_id?: string | null;
+  expires_at?: string | null;
+  settled_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
   creator: UserSummary;
+  counterparty?: UserSummary | null;
   match?: Match;
 };
 
@@ -105,6 +117,7 @@ export const stakelyApi = {
     const query = matchId ? `?match_id=${encodeURIComponent(matchId)}` : "";
     return request<Bet[]>(`/api/bets/open${query}`, { signal });
   },
+  myBets: (auth: AuthHeaders, signal?: AbortSignal) => request<Bet[]>("/api/bets?role=mine", { auth, signal }),
   leaderboard: (signal?: AbortSignal) => request<LeaderboardEntry[]>("/api/leaderboard", { signal }),
   registerUser: (auth: AuthHeaders, displayName?: string) => request<UserSummary>("/api/users", {
     method: "POST",

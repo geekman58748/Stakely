@@ -40,8 +40,8 @@ The current production API is still the older deployment. The new frontend inten
 | `/#leaderboard` | Leaderboard | Pixel-focused approved design | Showcase data is hardcoded |
 | `/#matches` | Matches | Functional | Real `GET /api/matches` |
 | `/#match/:id` | Match detail | Functional | Real match, odds, open bets, wallet, and escrow flow |
-| `/#my-bets` | My Bets | Navigation reserved | Page not built yet |
-| `/#receipts` | Receipts | Navigation reserved | Page not built yet |
+| `/#my-bets` | My Bets | Functional | Real wallet-authenticated `GET /api/bets?role=mine` |
+| `/#receipts/:id?` | Settlement Receipts | Functional | Derived from settled wallet bets, TxLINE proof, and Solana transaction fields |
 
 ### Frontend integration
 
@@ -50,8 +50,11 @@ The current production API is still the older deployment. The new frontend inten
 - Phantom/Solflare injected wallet connection.
 - Devnet escrow PDA derivation and Anchor instruction construction.
 - Create-challenge transaction followed by API publication.
+- My Bets filters for open, locked/live, settled, and cancelled records.
+- Proof-aware receipts that only show `Verified` when both the TxLINE proof and settlement transaction are present.
+- Receipt deep links, Solana Explorer references, copy controls, and clear incomplete legacy states.
 - Safety gate that shows `Backend update pending` while the old API is live.
-- Responsive foundation for desktop web and the later Telegram Mini App adaptation.
+- Responsive desktop and 390px mini-app layouts for the portfolio and receipt workflow.
 
 ### API and escrow work included on this branch
 
@@ -202,8 +205,6 @@ Ola is unblocked for the complete UI when all of these are true:
 While Maxx completes the P0 backend work, Ola can continue without waiting on visual implementation:
 
 - Connect Discover to real matches and challenges while preserving the approved design exactly.
-- Build My Bets with open, locked/live, won, lost, and cancelled states.
-- Build the settlement Receipt/proof viewer.
 - Build the Accept Challenge interaction after the accept contract is confirmed.
 - Connect Leaderboard to settled user records when that data is reliable.
 - Adapt the stable web flow into the Telegram Mini App viewport and Telegram SDK.
