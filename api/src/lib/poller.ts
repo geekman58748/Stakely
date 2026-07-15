@@ -90,7 +90,8 @@ async function settleBetsForMatch(
       creator:users!bets_creator_id_fkey(id,telegram_id,display_name),
       counterparty:users!bets_counterparty_id_fkey(id,telegram_id,display_name)`)
     .eq("match_id", matchId)
-    .in("status", ["challenged", "locked", "live"]);
+    // A challenge is only settleable after both sides have funded escrow.
+    .in("status", ["locked", "live"]);
 
   if (!bets?.length) return;
 
@@ -241,4 +242,3 @@ export function startPoller() {
   tick();
   setInterval(tick, POLL_MS);
 }
-

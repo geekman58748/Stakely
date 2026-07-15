@@ -56,6 +56,7 @@ class TxLineRealClient {
   private readonly apiOrigin: string;
   private guestJwt: string | null = null;
   private jwtExpiresAt: number = 0;
+  private participant1IsHome = new Map<string, boolean>();
 
   constructor() {
     const network = process.env.TXLINE_NETWORK ?? "devnet";
@@ -95,22 +96,30 @@ class TxLineRealClient {
 
   async getFixtures(competitionId?: number): Promise<Fixture[]> {
     const params = competitionId ? { competitionId: String(competitionId) } : undefined;
-    const raw = await this.get<any[]>("/api/fixtures/snapshot", params);
-    return raw.map(f => ({
-      id:            String(f.FixtureId),
-      homeTeam:      f.Participant1IsHome ? f.Participant1 : f.Participant2,
-      awayTeam:      f.Participant1IsHome ? f.Participant2 : f.Participant1,
-      homeTeamCode:  f.Participant1IsHome ? String(f.Participant1Id) : String(f.Participant2Id),
-      awayTeamCode:  f.Participant1IsHome ? String(f.Participant2Id) : String(f.Participant1Id),
+    const response = await this.get<any>("/api/fixtures/snapshot", params);
+    const raw = normalizeRecords(response);
+    return raw.map(f => {
+      const id = String(f.FixtureId ?? f.fixtureId);
+      const participant1IsHome = f.Participant1IsHome ?? f.participant1IsHome ?? true;
+      this.participant1IsHome.set(id, Boolean(participant1IsHome));
+      return {
+      id,
+      homeTeam:      participant1IsHome ? f.Participant1 : f.Participant2,
+      awayTeam:      participant1IsHome ? f.Participant2 : f.Participant1,
+      homeTeamCode:  participant1IsHome ? String(f.Participant1Code ?? f.Participant1Id ?? "") : String(f.Participant2Code ?? f.Participant2Id ?? ""),
+      awayTeamCode:  participant1IsHome ? String(f.Participant2Code ?? f.Participant2Id ?? "") : String(f.Participant1Code ?? f.Participant1Id ?? ""),
       kickoffAt:     new Date(f.StartTime).toISOString(),
-      status:        "scheduled",
+      status:        mapFixtureStatus(f),
       competition:   f.Competition ?? "Unknown",
       competitionId: f.CompetitionId ?? 0,
-    }));
+      };
+    });
   }
 
   async getOdds(fixtureId: string): Promise<Odds> {
-    const raw = await this.get<any>(`/api/odds/snapshot/${fixtureId}`);
+    const response = await this.get<any>(`/api/odds/snapshot/${fixtureId}`);
+    const records = normalizeRecords(response);
+    const raw = records.at(-1) ?? response;
     return {
       fixtureId,
       homeOdds: raw.HomeOdds  ?? raw.home_odds  ?? null,
@@ -121,22 +130,104 @@ class TxLineRealClient {
   }
 
   async getLiveScores(): Promise<LiveScore[]> {
-    // Scores are per-fixture; we'd need a fixture list first in production
-    // For live feed use /api/scores/stream (SSE)
-    return [];
+    const now = Date.now();
+    const fixtures = await this.getFixtures();
+    const candidates = fixtures.filter(fixture => {
+      const kickoff = new Date(fixture.kickoffAt).getTime();
+      return ["live", "halftime"].includes(fixture.status)
+        || (kickoff <= now + 30 * 60_000 && kickoff >= now - 4 * 60 * 60_000);
+    });
+    const scores = await Promise.allSettled(candidates.map(fixture => this.getScore(fixture.id)));
+    return scores
+      .filter((result): result is PromiseFulfilledResult<LiveScore> => result.status === "fulfilled")
+      .map(result => result.value)
+      .filter(score => ["live", "halftime"].includes(score.status));
   }
 
   async getScore(fixtureId: string): Promise<LiveScore> {
-    const raw = await this.get<any>(`/api/scores/snapshot/${fixtureId}`);
+    const response = await this.get<any>(`/api/scores/snapshot/${fixtureId}`);
+    const records = normalizeRecords(response);
+    const latest = records.at(-1) ?? response;
+    const statValues = new Map<number, number>();
+    for (const record of records) {
+      const key = Number(record.StatKey ?? record.statKey ?? record.Key ?? record.key);
+      const value = Number(record.StatValue ?? record.statValue ?? record.Value ?? record.value);
+      if (Number.isFinite(key) && Number.isFinite(value)) statValues.set(key, value);
+    }
+    const participant1Goals = firstNumber(
+      statValues.get(1), latest.Participant1Goals, latest.participant1Goals, latest.HomeScore,
+    );
+    const participant2Goals = firstNumber(
+      statValues.get(2), latest.Participant2Goals, latest.participant2Goals, latest.AwayScore,
+    );
+    const participant1IsHome = this.participant1IsHome.get(fixtureId) ?? true;
+    const status = mapScoreStatus(latest);
     return {
       fixtureId,
-      homeScore:   raw.Participant1Goals ?? 0,
-      awayScore:   raw.Participant2Goals ?? 0,
-      minute:      raw.Minute ?? null,
-      status:      raw.GamePhase ?? "NS",
-      merkleProof: raw, // preserve full payload — contains hashes, signatures, proof fields
+      homeScore:   participant1IsHome ? participant1Goals : participant2Goals,
+      awayScore:   participant1IsHome ? participant2Goals : participant1Goals,
+      minute:      firstNumberOrNull(latest.Minute, latest.minute, latest.MatchMinute),
+      status,
+      merkleProof: {
+        fixtureId,
+        seq: latest.Seq ?? latest.seq ?? null,
+        participant1IsHome,
+        snapshot: records,
+      },
     };
   }
+
+  async getSettlementProof(fixtureId: string, seq: number): Promise<unknown> {
+    if (!Number.isInteger(seq) || seq <= 0) throw new Error("A real TxLINE score sequence is required");
+    return this.get("/api/scores/stat-validation", {
+      fixtureId,
+      seq: String(seq),
+      statKeys: "1,2",
+    });
+  }
+}
+
+function normalizeRecords(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+  for (const key of ["data", "records", "items", "snapshot", "result"]) {
+    if (Array.isArray(payload?.[key])) return payload[key];
+  }
+  return payload ? [payload] : [];
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return 0;
+}
+
+function firstNumberOrNull(...values: unknown[]) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return null;
+}
+
+function mapFixtureStatus(fixture: any): Fixture["status"] {
+  const value = String(fixture.GameState ?? fixture.Status ?? fixture.FixtureStatus ?? "").toLowerCase();
+  if (value.includes("postpon") || value.includes("cancel")) return "postponed";
+  if (value.includes("finish") || value.includes("final") || value === "ft") return "finished";
+  if (value.includes("half")) return "halftime";
+  if (value.includes("live") || value.includes("progress") || value.includes("playing")) return "live";
+  return "scheduled";
+}
+
+function mapScoreStatus(score: any): LiveScore["status"] {
+  const action = String(score.Action ?? score.action ?? "").toLowerCase();
+  const value = String(score.GamePhase ?? score.gamePhase ?? score.Status ?? score.status ?? "").toLowerCase();
+  const period = Number(score.Period ?? score.period);
+  if (action === "game_finalised" || value.includes("finish") || value === "ft" || period === 100) return "finished";
+  if (value.includes("half")) return "halftime";
+  if (value.includes("live") || value.includes("progress") || Number.isFinite(period)) return "live";
+  return "scheduled";
 }
 
 // ── Mock client ────────────────────────────────────────────────────────────────
@@ -173,4 +264,5 @@ class TxLineMockClient {
 
 const useMock = process.env.TXLINE_USE_MOCK === "true" || !process.env.TXLINE_API_TOKEN;
 export const txline = useMock ? new TxLineMockClient() : new TxLineRealClient();
+export const txlineMode = useMock ? "mock" : "real";
 console.log(`[txline] using ${useMock ? "MOCK" : "REAL"} client`);

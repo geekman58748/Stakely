@@ -16,7 +16,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer, CloseAccount};
 
-declare_id!("EscroW1111111111111111111111111111111111111");
+declare_id!("J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai");
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_BET_ID_LEN: usize = 64;

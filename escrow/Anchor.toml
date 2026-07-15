@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-stakely_escrow = "EscroW1111111111111111111111111111111111111"
+stakely_escrow = "J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai"
 
 [registry]
 url = "https://api.apr.dev"
