@@ -8,6 +8,11 @@ skip-lint = false
 [programs.devnet]
 stakely_escrow = "J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai"
 
+[programs.mainnet]
+# Fill in after: anchor build && anchor deploy --provider.cluster mainnet-beta
+# Then run: npm run deploy (initializes GlobalConfig with keeper wallet)
+stakely_escrow = "FILL_AFTER_MAINNET_DEPLOY"
+
 [registry]
 url = "https://api.apr.dev"
 
