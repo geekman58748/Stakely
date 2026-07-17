@@ -9,6 +9,7 @@ import { botsRouter }      from "./routes/bots.js";
 import { telegramRouter }  from "./routes/telegram.js";
 import { registerWebhook } from "./lib/telegram.js";
 import { startPoller }    from "./lib/poller.js";
+import { txlineMode } from "./lib/txline.js";
 
 const app  = express();
 const PORT = process.env.PORT ?? 4000;
@@ -29,8 +30,12 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     timestamp: new Date().toISOString(),
-    txline: process.env.TXLINE_USE_MOCK === "true" ? "mock" : "real",
+    txline: txlineMode,
     supabase: !!process.env.SUPABASE_URL,
+    capabilities: {
+      escrowVerification: true,
+      contractVersion: "v1",
+    },
   });
 });
 

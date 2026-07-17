@@ -24,15 +24,17 @@ const idl  = JSON.parse(readFileSync(path.resolve(__dirname, "../target/idl/stak
 const program = new anchor.Program(idl, provider);
 
 async function settleEscrow(betId: string, winnerPubkey: PublicKey) {
-  const [escrowPda]    = PublicKey.findProgramAddressSync([Buffer.from("escrow"), Buffer.from(betId)], program.programId);
-  const [vaultPda]     = PublicKey.findProgramAddressSync([Buffer.from("vault"),  Buffer.from(betId)], program.programId);
+  const escrowBetId = betId.replaceAll("-", "");
+  if (Buffer.byteLength(escrowBetId) > 32) throw new Error("Bet ID is too long for a Solana escrow seed");
+  const [escrowPda]    = PublicKey.findProgramAddressSync([Buffer.from("escrow"), Buffer.from(escrowBetId)], program.programId);
+  const [vaultPda]     = PublicKey.findProgramAddressSync([Buffer.from("vault"),  Buffer.from(escrowBetId)], program.programId);
   const [globalConfig] = PublicKey.findProgramAddressSync([Buffer.from("global_config")], program.programId);
 
-  const escrow = await program.account.escrowState.fetch(escrowPda);
+  const escrow = await (program.account as any).escrowState.fetch(escrowPda);
   const winnerAta = getAssociatedTokenAddressSync(USDC_DEVNET, winnerPubkey);
 
   const sig = await program.methods
-    .settleEscrow(betId, winnerPubkey)
+    .settleEscrow(escrowBetId, winnerPubkey)
     .accounts({
       authority:           keeper.publicKey,
       globalConfig,

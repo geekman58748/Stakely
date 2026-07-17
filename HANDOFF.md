@@ -29,7 +29,7 @@ Re-add these to the new Replit session:
 | `SUPABASE_URL` | Supabase dashboard → Project Settings → API |
 | `SUPABASE_ANON_KEY` | Supabase dashboard → Project Settings → API |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard → Project Settings → API |
-| `TXLINE_API_TOKEN` | Already set on Railway. Value: `txoracle_api_2dffaac495e54767af7e1bb664778ef6` |
+| `TXLINE_API_TOKEN` | Retrieve from Railway or the TxLINE dashboard. Rotate the previously exposed token before the next deploy. |
 | `STAKELY_DEV_WALLET` | The devnet keypair JSON array — check old Replit secrets or Railway |
 | `TELEGRAM_BOT_TOKEN` | Already set on Railway. Get from @BotFather if needed |
 
@@ -111,7 +111,7 @@ x-timestamp:      <unix ms, must be within 5 min>
 ### ✅ Solana Anchor escrow (`escrow/`)
 Full program written in `programs/stakely-escrow/src/lib.rs`.  
 Instructions: `initialize`, `create_escrow`, `accept_escrow`, `settle_escrow`, `cancel_escrow`  
-**NEEDS: `anchor build` + `anchor deploy` on a local machine with Rust/Anchor installed.**  
+The contract builds locally with Anchor 0.31.0 and is deployed on devnet at `J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai`. The keeper config is initialized.
 Deploy script: `escrow/scripts/deploy.ts`
 
 ---
@@ -121,11 +121,11 @@ Deploy script: `escrow/scripts/deploy.ts`
 | # | Item | Notes |
 |---|---|---|
 | 1 | **Streak SQL functions** | Paste 2 functions above into Supabase SQL editor. 2 min. |
-| 2 | **Anchor escrow build + deploy** | Run `anchor build && anchor deploy` locally. Need Rust + Anchor 0.31.0. |
-| 3 | **Frontend (React+Vite)** | Ola's domain. See Ola's integration guide below. |
-| 4 | **Merkle proof receipts** | Wire TxLINE on-chain proof into settle flow. |
-| 5 | **TxLINE mainnet token** | Wallet `C28E476yiqMkW1RNFPhZhtQHeiVWL2oMGrbXyHus5CU6` needs ~$0.15 SOL, then run activation. |
-| 6 | **End-to-end test** | Full bet lifecycle with real wallets. |
+| 2 | **Railway escrow config** | Add `ESCROW_PROGRAM_ID`, `SOLANA_RPC_URL`, and a new `KEEPER_API_SECRET`. Keep the keeper key server-side only. |
+| 3 | **Accept challenge UI** | Submit `accept_escrow`, then send the confirmed `accept_tx` to the API. |
+| 4 | **Merkle proof receipts** | Validate TxLINE stat proof on-chain before the keeper settles. |
+| 5 | **TxLINE token audit** | Rotate the exposed token and confirm Railway is not silently using mock mode. |
+| 6 | **End-to-end test** | Full bet lifecycle with two real devnet wallets. |
 | 7 | **Demo video + submission** | July 19 deadline. |
 
 ---
@@ -134,9 +134,9 @@ Deploy script: `escrow/scripts/deploy.ts`
 
 **Base URL:** `https://stakely-production.up.railway.app` (set as `VITE_API_URL`)
 
-**Packages:**
+**Packages currently used:**
 ```bash
-npm install @solana/wallet-adapter-react @solana/wallet-adapter-wallets @solana/web3.js bs58
+npm install @coral-xyz/anchor @solana/web3.js bs58 buffer
 ```
 
 **Auth pattern (every protected request):**
@@ -157,8 +157,8 @@ headers: {
 - Match detail + odds: `GET /api/matches/:id`
 - Live scores: `GET /api/matches/live`
 - Open bets: `GET /api/bets/open`
-- Create bet: `POST /api/bets` `{ match_id, creator_side, amount_usdc, counterparty_wallet? }`
-- Accept bet: `PATCH /api/bets/:id/accept`
+- Create bet: `POST /api/bets` after on-chain funding, with `{ id, match_id, creator_side, amount_usdc, escrow_pda, create_tx }`
+- Accept bet: `PATCH /api/bets/:id/accept` after on-chain funding, with `{ accept_tx }`
 - My bets: `GET /api/bets?role=mine`
 - Leaderboard: `GET /api/leaderboard`
 - AI predict: `POST /api/bots/predict/:matchId`
@@ -171,7 +171,7 @@ headers: {
 
 - TxLINE devnet returns real Friendlies fixtures, WC 2026 fixtures appear as scheduled
 - Telegram `/link` flow requires user to exist in `users` table first (frontend creates this on sign-in)
-- Anchor escrow program ID is placeholder `EscroW111...` — update after `anchor build` generates real keypair
+- Escrow is deployed on devnet; Railway still needs the program ID and keeper environment configuration
 - Railway sets `PORT` dynamically — never hardcode 4000 in code (already handled)
 - TxLINE guest JWT has 30-day TTL, auto-refreshed in client
 

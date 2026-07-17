@@ -39,7 +39,7 @@ async function main() {
 
   // Check if already initialized
   try {
-    const existing = await program.account.globalConfig.fetch(globalConfigPda);
+    const existing = await (program.account as any).globalConfig.fetch(globalConfigPda);
     console.log("GlobalConfig already exists. Authority:", existing.authority.toBase58());
     return;
   } catch {
