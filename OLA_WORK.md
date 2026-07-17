@@ -1,6 +1,6 @@
 # Ola's Work: Maxx Integration Handoff
 
-**Date:** July 15, 2026
+**Date:** July 17, 2026
 **Owners:** Ola (product and frontend), Maxx (backend and integration)
 **Working branch:** `codex/ola-web-integration`
 
@@ -9,6 +9,19 @@
 This is the direct handoff between Ola's web work and Maxx's backend work. It records what is already built, what is still hardcoded, the API contract the frontend now expects, and the exact tasks Maxx needs to complete before the hackathon demo is end-to-end.
 
 Mainnet is currently a **no-go for real funds**. Read `MAINNET_READINESS.md` for the verified devnet result, official mainnet addresses, security findings, and promotion checklist.
+
+Contract v2 and the chain-first keeper are now implemented locally. They have **not** been deployed to devnet. Maxx should start with the new "Contract V2 deployment handoff" section below and must not deploy the old v1 IDL or database-only poller.
+
+## Contract V2 deployment handoff
+
+1. Apply `db/migrations/20260717_contract_v2.sql` to Supabase.
+2. Use Node `20.18+`, Anchor `0.31.1`, and Solana `2.1.0` as pinned in `escrow/Anchor.toml`.
+3. Fund the devnet deployment wallet for the approximately `2.82 SOL` upgrade buffer plus fees.
+4. Build and deploy `escrow/programs/stakely-escrow`; do not deploy while the undefined-syscall warning is present.
+5. Run `npm run deploy` inside `escrow/` with Circle devnet USDC and TxLINE devnet program `6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J`.
+6. Configure the API with `ESCROW_KEEPER_WALLET`, `ESCROW_PROGRAM_ID`, `SOLANA_RPC_URL`, `TXLINE_PROGRAM_ID`, `TXLINE_API_TOKEN`, and `TXLINE_NETWORK=devnet`.
+7. Confirm `/api/health` returns `contractVersion: "v2"` and `txlineProofSettlement: true` before funding is enabled in the web app.
+8. Run the two-wallet Circle devnet USDC flow and preserve create, accept, TxLINE proof, settlement, and receipt evidence.
 
 The immediate target is a judge-ready flow:
 
@@ -24,7 +37,7 @@ The immediate target is a judge-ready flow:
 
 The approved web design has been translated into a working React app in `web/`. The match flow is connected to the API, and the challenge builder can construct and submit a real devnet escrow transaction through an injected Solana wallet.
 
-The Stakely escrow program is deployed on Solana devnet:
+The legacy Stakely escrow v1 program is deployed on Solana devnet. Contract v2 on this branch has not replaced it yet:
 
 - **Program ID:** `J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai`
 - **Explorer:** https://explorer.solana.com/address/J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai?cluster=devnet
@@ -63,15 +76,17 @@ The current production API is still the older deployment. The new frontend inten
 
 ### API and escrow work included on this branch
 
-- `POST /api/bets` verifies the create transaction and escrow account before writing a challenge to Supabase.
-- `PATCH /api/bets/:id/accept` verifies the accept transaction and funded escrow before locking a bet.
+- `POST /api/bets` verifies the exact v2 create instruction and escrow account before writing a challenge to Supabase.
+- Contract v2 enforces the TxLINE daily scores root PDA derived from the exact proof timestamp.
+- Contract v2 initialization is restricted to the program upgrade authority, and the configured USDC mint and TxLINE verifier cannot be swapped after initialization.
+- `PATCH /api/bets/:id/accept` verifies the exact accept instruction and funded escrow before locking a bet.
 - `POST /api/bets/:id/settle` is protected by `x-keeper-secret` and requires a settlement transaction plus a Merkle proof.
 - The requested winner is no longer trusted; the API derives the winner from the stored match result.
 - TxLINE responses are normalized for real snapshot wrappers and arrays.
 - TxLINE sequence numbers and `Participant1IsHome` are preserved.
 - Score validation requests use stat keys `1,2` for the two team scores.
-- The poller only considers fully funded `locked` or `live` bets for settlement.
-- The escrow workspace builds with Anchor, and the devnet program is initialized with a keeper authority.
+- The poller only considers fully funded `locked` or `live` bets for settlement, submits the TxLINE proof on-chain first, and records Supabase state only after confirmation.
+- Contract v2 passes local-validator tests. The currently deployed devnet program is still v1 and must be upgraded before web funding can reopen.
 
 ## Backend Contract The Web Expects
 
@@ -85,7 +100,8 @@ The current production API is still the older deployment. The new frontend inten
   "txline": "real",
   "capabilities": {
     "escrowVerification": true,
-    "contractVersion": "v1"
+    "contractVersion": "v2",
+    "txlineProofSettlement": true
   }
 }
 ```
@@ -102,6 +118,7 @@ The current production API is still the older deployment. The new frontend inten
   "match_id": "txline-fixture-id",
   "creator_side": "home",
   "amount_usdc": 10,
+  "refund_after": "2026-07-20T20:00:00.000Z",
   "escrow_pda": "solana-address",
   "create_tx": "confirmed-devnet-signature"
 }
@@ -139,24 +156,18 @@ The request also requires the existing wallet authentication headers.
 - [ ] Confirm the deployed `/api/health` returns `txline: "real"` and `escrowVerification: true`.
 - [ ] Tell Ola when the health capability is live so the frontend safety gate opens.
 
-### P0: Replace database-only settlement
+### P0: Deploy and prove chain-first settlement
 
-This is the most important remaining backend issue.
+The database-only settlement implementation has been replaced on this branch. It is not live until contract v2, the database migration, and the API are deployed together.
 
-The current `settleBetsForMatch` function in `api/src/lib/poller.ts` still marks bets as settled directly in Supabase. It does **not** yet validate the TxLINE proof on-chain or call Stakely's `settle_escrow` instruction. That means the database can say `settled` while funds remain in escrow.
-
-Maxx needs to replace that path with a real keeper worker:
-
-- [ ] Detect the final TxLINE `game_finalised` event or final score snapshot.
-- [ ] Persist the actual TxLINE sequence number. Never substitute `0`.
-- [ ] Request `GET /api/scores/stat-validation` with `fixtureId`, real `seq`, and `statKeys=1,2`.
-- [ ] Verify the returned proof against the TxLINE validation program on devnet.
-- [ ] Preserve `Participant1IsHome` when mapping participant scores to Stakely's home/away outcome.
-- [ ] Determine the winner from the verified result.
-- [ ] Sign and send Stakely's `settle_escrow` instruction with the keeper wallet.
-- [ ] Wait for Solana confirmation.
-- [ ] Record `settle_tx`, proof, winner, and settlement time through the protected settle endpoint.
-- [ ] Send Telegram settlement notifications only after the on-chain payout is confirmed.
+- [x] Detect only the final TxLINE `game_finalised`, status `100`, period `100` record.
+- [x] Preserve the real sequence number and request `statKeys=1,2`.
+- [x] CPI into TxLINE `validateStatV2` and derive the winner inside contract v2.
+- [x] Preserve `Participant1IsHome` when mapping participant scores to home/away.
+- [x] Wait for Solana confirmation and escrow closure before database updates or notifications.
+- [ ] Install the pinned supported compiler pair and produce a warning-free artifact.
+- [ ] Deploy contract v2, apply the migration, and deploy the API together.
+- [ ] Prove the flow with a real final TxLINE record and Circle devnet USDC.
 
 The poller must never mark a bet settled before the escrow payout succeeds.
 
@@ -188,9 +199,13 @@ ESCROW_PROGRAM_ID=J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai
 SOLANA_RPC_URL=https://api.devnet.solana.com
 KEEPER_API_SECRET=<strong-random-secret>
 TXLINE_API_TOKEN=<rotated-token>
+TXLINE_NETWORK=devnet
+TXLINE_PROGRAM_ID=6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J
+USDC_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+ESCROW_KEEPER_WALLET=<json-byte-array-or-base58-secret>
 ```
 
-Use a private/reliable Solana RPC for the demo if available. The keeper wallet secret will also need a Railway secret when the worker is implemented. Agree on one environment-variable name and keep it out of Git.
+Use Node `20.18+` and a private/reliable Solana RPC for the demo if available. Keep every wallet secret and API token in Railway secrets, never in Git.
 
 ## End-to-End Definition of Done
 

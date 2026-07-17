@@ -10,6 +10,8 @@ import { telegramRouter }  from "./routes/telegram.js";
 import { registerWebhook } from "./lib/telegram.js";
 import { startPoller }    from "./lib/poller.js";
 import { txlineMode } from "./lib/txline.js";
+import { isEscrowV2Ready } from "./lib/escrow.js";
+import { db } from "./lib/supabase.js";
 
 const app  = express();
 const PORT = process.env.PORT ?? 4000;
@@ -26,15 +28,28 @@ app.use("/api/bots",        botsRouter);
 app.use("/api/telegram",    telegramRouter);
 
 // ── Health ────────────────────────────────────────────────────────────────────
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (_req, res) => {
+  const [escrowReady, migrationResult] = await Promise.all([
+    isEscrowV2Ready().catch(() => false),
+    db.from("bets").select("refund_after,txline_seq,daily_scores_root").limit(1),
+  ]);
+  const databaseReady = !migrationResult.error;
+  const proofSettlementReady = Boolean(
+    escrowReady
+    && databaseReady
+    && txlineMode === "real"
+    && process.env.ESCROW_KEEPER_WALLET
+    && process.env.TXLINE_API_TOKEN,
+  );
   res.json({
     ok: true,
     timestamp: new Date().toISOString(),
     txline: txlineMode,
     supabase: !!process.env.SUPABASE_URL,
     capabilities: {
-      escrowVerification: true,
-      contractVersion: "v1",
+      escrowVerification: escrowReady && databaseReady,
+      contractVersion: escrowReady ? "v2" : "unavailable",
+      txlineProofSettlement: proofSettlementReady,
     },
   });
 });

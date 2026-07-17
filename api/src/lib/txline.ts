@@ -23,6 +23,7 @@ export interface Fixture {
   status: "scheduled" | "live" | "halftime" | "finished" | "postponed";
   competition: string;
   competitionId: number;
+  participant1IsHome: boolean;
 }
 
 export interface Odds {
@@ -40,15 +41,18 @@ export interface LiveScore {
   minute: number | null;
   status: string;
   merkleProof?: unknown; // raw TxLINE score payload — cryptographic receipt for settlement
+  seq: number | null;
+  finalised: boolean;
+  participant1IsHome: boolean;
 }
 
 // ── Mock data (realistic WC 2026 fixtures) ─────────────────────────────────────
 const MOCK_FIXTURES: Fixture[] = [
-  { id: "wc_001", homeTeam: "Brazil",   awayTeam: "Argentina", homeTeamCode: "BRA", awayTeamCode: "ARG", kickoffAt: new Date(Date.now() + 2*3600000).toISOString(),  status: "scheduled", competition: "FIFA World Cup 2026", competitionId: 500001 },
-  { id: "wc_002", homeTeam: "France",   awayTeam: "England",   homeTeamCode: "FRA", awayTeamCode: "ENG", kickoffAt: new Date(Date.now() + 5*3600000).toISOString(),  status: "scheduled", competition: "FIFA World Cup 2026", competitionId: 500001 },
-  { id: "wc_003", homeTeam: "Spain",    awayTeam: "Germany",   homeTeamCode: "ESP", awayTeamCode: "GER", kickoffAt: new Date(Date.now() + 24*3600000).toISOString(), status: "scheduled", competition: "FIFA World Cup 2026", competitionId: 500001 },
-  { id: "wc_004", homeTeam: "Portugal", awayTeam: "Morocco",   homeTeamCode: "POR", awayTeamCode: "MAR", kickoffAt: new Date(Date.now() - 1*3600000).toISOString(),  status: "live",      competition: "FIFA World Cup 2026", competitionId: 500001 },
-  { id: "wc_005", homeTeam: "Japan",    awayTeam: "USA",       homeTeamCode: "JPN", awayTeamCode: "USA", kickoffAt: new Date(Date.now() - 5*3600000).toISOString(),  status: "finished",  competition: "FIFA World Cup 2026", competitionId: 500001 },
+  { id: "wc_001", homeTeam: "Brazil",   awayTeam: "Argentina", homeTeamCode: "BRA", awayTeamCode: "ARG", kickoffAt: new Date(Date.now() + 2*3600000).toISOString(),  status: "scheduled", competition: "FIFA World Cup 2026", competitionId: 500001, participant1IsHome: true },
+  { id: "wc_002", homeTeam: "France",   awayTeam: "England",   homeTeamCode: "FRA", awayTeamCode: "ENG", kickoffAt: new Date(Date.now() + 5*3600000).toISOString(),  status: "scheduled", competition: "FIFA World Cup 2026", competitionId: 500001, participant1IsHome: true },
+  { id: "wc_003", homeTeam: "Spain",    awayTeam: "Germany",   homeTeamCode: "ESP", awayTeamCode: "GER", kickoffAt: new Date(Date.now() + 24*3600000).toISOString(), status: "scheduled", competition: "FIFA World Cup 2026", competitionId: 500001, participant1IsHome: true },
+  { id: "wc_004", homeTeam: "Portugal", awayTeam: "Morocco",   homeTeamCode: "POR", awayTeamCode: "MAR", kickoffAt: new Date(Date.now() - 1*3600000).toISOString(),  status: "live",      competition: "FIFA World Cup 2026", competitionId: 500001, participant1IsHome: true },
+  { id: "wc_005", homeTeam: "Japan",    awayTeam: "USA",       homeTeamCode: "JPN", awayTeamCode: "USA", kickoffAt: new Date(Date.now() - 5*3600000).toISOString(),  status: "finished",  competition: "FIFA World Cup 2026", competitionId: 500001, participant1IsHome: true },
 ];
 
 // ── Real client ────────────────────────────────────────────────────────────────
@@ -112,6 +116,7 @@ class TxLineRealClient {
       status:        mapFixtureStatus(f),
       competition:   f.Competition ?? "Unknown",
       competitionId: f.CompetitionId ?? 0,
+      participant1IsHome: Boolean(participant1IsHome),
       };
     });
   }
@@ -148,6 +153,8 @@ class TxLineRealClient {
     const response = await this.get<any>(`/api/scores/snapshot/${fixtureId}`);
     const records = normalizeRecords(response);
     const latest = records.at(-1) ?? response;
+    const finalRecord = [...records].reverse().find(isFinalScoreRecord);
+    const selected = finalRecord ?? latest;
     const statValues = new Map<number, number>();
     for (const record of records) {
       const key = Number(record.StatKey ?? record.statKey ?? record.Key ?? record.key);
@@ -161,13 +168,18 @@ class TxLineRealClient {
       statValues.get(2), latest.Participant2Goals, latest.participant2Goals, latest.AwayScore,
     );
     const participant1IsHome = this.participant1IsHome.get(fixtureId) ?? true;
-    const status = mapScoreStatus(latest);
+    const status = mapScoreStatus(selected);
+    const seq = Number(selected.Seq ?? selected.seq);
+    const finalised = isFinalScoreRecord(selected);
     return {
       fixtureId,
       homeScore:   participant1IsHome ? participant1Goals : participant2Goals,
       awayScore:   participant1IsHome ? participant2Goals : participant1Goals,
-      minute:      firstNumberOrNull(latest.Minute, latest.minute, latest.MatchMinute),
+      minute:      firstNumberOrNull(selected.Minute, selected.minute, selected.MatchMinute),
       status,
+      seq: Number.isInteger(seq) && seq > 0 ? seq : null,
+      finalised,
+      participant1IsHome,
       merkleProof: {
         fixtureId,
         seq: latest.Seq ?? latest.seq ?? null,
@@ -230,6 +242,13 @@ function mapScoreStatus(score: any): LiveScore["status"] {
   return "scheduled";
 }
 
+function isFinalScoreRecord(score: any) {
+  const action = String(score?.Action ?? score?.action ?? "").toLowerCase();
+  const statusId = Number(score?.StatusId ?? score?.statusId);
+  const period = Number(score?.Period ?? score?.period);
+  return action === "game_finalised" && statusId === 100 && period === 100;
+}
+
 // ── Mock client ────────────────────────────────────────────────────────────────
 class TxLineMockClient {
   async getFixtures(): Promise<Fixture[]> { return MOCK_FIXTURES; }
@@ -246,6 +265,7 @@ class TxLineMockClient {
   async getLiveScores(): Promise<LiveScore[]> {
     return MOCK_FIXTURES.filter(f => f.status === "live").map(f => ({
       fixtureId: f.id, homeScore: 1, awayScore: 0, minute: 67, status: "live",
+      seq: null, finalised: false, participant1IsHome: f.participant1IsHome,
     }));
   }
   async getScore(id: string): Promise<LiveScore> {
@@ -257,8 +277,14 @@ class TxLineMockClient {
       awayScore: 1,
       minute:    f?.status === "live" ? 67 : null,
       status:    f?.status ?? "scheduled",
+      seq: finished ? 1 : null,
+      finalised: Boolean(finished),
+      participant1IsHome: f?.participant1IsHome ?? true,
       merkleProof: finished ? { fixtureId: id, merkleRoot: `mock_root_${id}`, signature: `mock_sig_${Date.now()}`, ts: new Date().toISOString() } : undefined,
     };
+  }
+  async getSettlementProof(): Promise<never> {
+    throw new Error("Mock TxLINE data cannot settle an escrow");
   }
 }
 

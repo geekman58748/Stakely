@@ -28,6 +28,7 @@ create table if not exists matches (
   away_team       text not null,
   home_team_code  text,                          -- e.g. "BRA"
   away_team_code  text,
+  participant1_is_home boolean not null default true, -- TxLINE stat keys 1/2 ordering
   kickoff_at      timestamptz not null,
   status          text not null default 'scheduled',
   -- scheduled | live | halftime | finished | postponed
@@ -72,6 +73,11 @@ create table if not exists bets (
   settle_tx       text,                          -- on-chain settlement transaction sig
   winner_id       uuid references users(id),
   expires_at      timestamptz,                   -- auto-cancel if not accepted by kickoff
+  refund_after    timestamptz,                   -- both sides can recover after this deadline
+  txline_seq      bigint,                        -- final game_finalised score sequence
+  daily_scores_root text,                        -- TxLINE root PDA used by settlement
+  settlement_error text,
+  settlement_attempted_at timestamptz,
   settled_at      timestamptz,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()

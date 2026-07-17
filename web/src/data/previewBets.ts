@@ -42,6 +42,7 @@ function fixture(input: Partial<Match> & Pick<Match, "id" | "home_team" | "away_
     away_odds: 2.8,
     merkle_proof: null,
     ...input,
+    participant1_is_home: input.participant1_is_home ?? true,
   };
 }
 

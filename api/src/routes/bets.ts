@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "../lib/supabase.js";
 import { requireAuth } from "../middleware/auth.js";
-import { verifyAcceptedEscrow, verifyCreatedEscrow } from "../lib/escrow.js";
+import { verifyAcceptedEscrow, verifyCreatedEscrow, verifySettledEscrow } from "../lib/escrow.js";
 
 const router = Router();
 
@@ -48,10 +48,10 @@ router.get("/open", async (req, res) => {
 
 /** POST /bets — create a new bet challenge */
 router.post("/", requireAuth, async (req, res) => {
-  const { id, match_id, creator_side, amount_usdc, counterparty_wallet, expires_at, escrow_pda, create_tx } = req.body;
+  const { id, match_id, creator_side, amount_usdc, counterparty_wallet, expires_at, refund_after, escrow_pda, create_tx } = req.body;
 
-  if (!id || !match_id || !creator_side || !amount_usdc || !escrow_pda || !create_tx) {
-    res.status(400).json({ error: "id, match_id, creator_side, amount_usdc, escrow_pda, and create_tx are required" });
+  if (!id || !match_id || !creator_side || !amount_usdc || !refund_after || !escrow_pda || !create_tx) {
+    res.status(400).json({ error: "id, match_id, creator_side, amount_usdc, refund_after, escrow_pda, and create_tx are required" });
     return;
   }
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
@@ -69,12 +69,23 @@ router.post("/", requireAuth, async (req, res) => {
   }
 
   // Verify match exists and hasn't started
-  const { data: match } = await db.from("matches").select("id,kickoff_at,status").eq("id", match_id).single();
+  const { data: match } = await db.from("matches").select("id,kickoff_at,status,participant1_is_home").eq("id", match_id).single();
   if (!match) { res.status(404).json({ error: "Match not found" }); return; }
   if (match.status === "finished" || match.status === "cancelled" || match.status === "postponed") {
     res.status(400).json({ error: "Match is already finished — no new bets accepted" }); return;
   }
   // Live betting allowed — users can challenge friends mid-match
+
+  const refundAfterDate = new Date(refund_after);
+  const refundAfterSeconds = Math.floor(refundAfterDate.getTime() / 1000);
+  const now = Date.now();
+  const kickoff = new Date(match.kickoff_at).getTime();
+  if (!Number.isFinite(refundAfterDate.getTime())
+    || refundAfterDate.getTime() < Math.max(now + 55 * 60_000, kickoff + 24 * 60 * 60_000)
+    || refundAfterDate.getTime() > now + 30 * 24 * 60 * 60_000) {
+    res.status(400).json({ error: "Recovery deadline must be at least 24 hours after kickoff and within 30 days" });
+    return;
+  }
 
   // Get creator's user ID
   const { data: creator } = await db.from("users").select("id").eq("wallet_address", req.walletAddress!).single();
@@ -88,6 +99,9 @@ router.post("/", requireAuth, async (req, res) => {
       creatorWallet: req.walletAddress!,
       amountUsdc: numericAmount,
       creatorSide: creator_side,
+      fixtureId: match.id,
+      participant1IsHome: Boolean(match.participant1_is_home),
+      refundAfter: refundAfterSeconds,
     });
   } catch (verificationError) {
     const message = verificationError instanceof Error ? verificationError.message : "Escrow verification failed";
@@ -113,6 +127,7 @@ router.post("/", requireAuth, async (req, res) => {
     status: "challenged",
     escrow_pda,
     create_tx,
+    refund_after: refundAfterDate.toISOString(),
     expires_at: expires_at ?? new Date(new Date(match.kickoff_at).getTime() - 5 * 60000).toISOString(),
   }).select(`
     *,
@@ -218,6 +233,14 @@ router.post("/:id/settle", async (req, res) => {
 
   const winner_id = bet.creator_side === result ? bet.creator_id : bet.counterparty_id;
   if (!winner_id) { res.status(400).json({ error: "Bet has no funded counterparty" }); return; }
+
+  try {
+    await verifySettledEscrow({ betId: bet.id, escrowPda: bet.escrow_pda, signature: settle_tx });
+  } catch (verificationError) {
+    const message = verificationError instanceof Error ? verificationError.message : "Settlement verification failed";
+    res.status(400).json({ error: message });
+    return;
+  }
 
   // Update bet
   await db.from("bets").update({

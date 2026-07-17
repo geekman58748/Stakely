@@ -68,7 +68,11 @@ export function MatchDetailPage({ matchId }: { matchId: string }) {
       setMatch(matchData);
       setOpenBets(betsData);
       setProgramReady(program.deployed);
-      setApiReady(Boolean(health.capabilities?.escrowVerification));
+      setApiReady(Boolean(
+        health.capabilities?.escrowVerification
+        && health.capabilities?.contractVersion === "v2"
+        && health.capabilities?.txlineProofSettlement,
+      ));
     } catch (loadError) {
       if (!signal?.aborted) setError(loadError instanceof Error ? loadError.message : "Could not load this match.");
     } finally {
@@ -102,12 +106,23 @@ export function MatchDetailPage({ matchId }: { matchId: string }) {
 
       setSubmitState("funding");
       const betId = crypto.randomUUID();
+      const refundAfterMs = Math.max(
+        new Date(match.kickoff_at).getTime() + 48 * 60 * 60_000,
+        Date.now() + 2 * 60 * 60_000,
+      );
+      if (refundAfterMs > Date.now() + 30 * 24 * 60 * 60_000) {
+        throw new Error("Challenges open when the fixture is within 28 days.");
+      }
+      const refundAfter = Math.floor(refundAfterMs / 1000);
       const escrow = await createEscrowChallenge({
         wallet: wallet.wallet,
         publicKey: wallet.publicKey,
         betId,
         amountUsdc: amount,
         side,
+        fixtureId: match.id,
+        participant1IsHome: match.participant1_is_home,
+        refundAfter,
       });
 
       setSubmitState("syncing");
@@ -118,6 +133,7 @@ export function MatchDetailPage({ matchId }: { matchId: string }) {
         match_id: match.id,
         creator_side: side,
         amount_usdc: amount,
+        refund_after: new Date(refundAfter * 1000).toISOString(),
         escrow_pda: escrow.escrowPda,
         create_tx: escrow.signature,
       });

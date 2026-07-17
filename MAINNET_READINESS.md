@@ -17,6 +17,28 @@ Stakely's core escrow lifecycle works on Solana devnet, but the current contract
 
 The passing devnet test uses a temporary test token mint. It proves the escrow mechanics, not the complete browser/API/TxLINE/Circle-USDC production flow.
 
+## Contract V2 Progress
+
+Contract v2 is implemented on `codex/ola-web-integration`, but it is **not deployed to devnet or mainnet** yet.
+
+- [x] Fixture ID and TxLINE participant ordering are stored in each escrow.
+- [x] The configured token mint is enforced during creation and stored for the escrow lifecycle.
+- [x] Initialization requires the deployed program's upgrade authority; the accepted mint and TxLINE verifier are immutable afterward.
+- [x] Payout accounts are constrained to the creator and funded counterparty.
+- [x] Escrow and vault rent always returns to the recorded creator.
+- [x] `settle_escrow` constructs a fixed two-stat equality strategy and CPIs into TxLINE `validateStatV2`.
+- [x] Only TxLINE stat keys `1,2` with final period `100` can settle.
+- [x] The TxLINE daily scores root PDA is derived and enforced from the exact proof timestamp on-chain.
+- [x] Winner selection is derived on-chain from the proven score.
+- [x] Accepted escrows gain a permissionless two-party refund after their recovery deadline.
+- [x] The API keeper submits settlement first, verifies confirmation and escrow closure, then updates Supabase.
+- [x] Funding and settlement API signatures are bound to exact Stakely instruction discriminators.
+- [x] Eight local-validator contract tests, four API proof-normalization tests, and four Rust unit tests pass.
+- [ ] Install and rebuild with the pinned Anchor `0.31.1` and Solana `2.1.0` toolchain. The first download was reset, so the current Solana `3.1.15` artifact is not approved for deployment.
+- [ ] Fund the devnet upgrade buffer. The current v2 upgrade estimate is approximately `2.82 SOL` plus fees.
+- [ ] Deploy and initialize v2 with Circle devnet USDC and the TxLINE devnet verifier.
+- [ ] Complete a real final-score proof settlement with two browser wallets.
+
 ### Devnet transaction evidence
 
 - Create and fund: [2RYrnQ...AmeziE](https://explorer.solana.com/tx/2RYrnQL8wT3XWQVz3hrKKSxb9pZoZWGTLb8xmf1kDfNpyECJupU881TjxBJUiUZVHwpALzsnxq39hktGqPAmeziE?cluster=devnet)
@@ -36,13 +58,13 @@ Sources: [TxLINE mainnet program reference](https://github.com/txodds/tx-on-chai
 
 ## P0 Mainnet Blockers
 
-- [ ] **Replace database-only settlement.** `api/src/lib/poller.ts` currently marks bets settled in Supabase without sending `settle_escrow`; funds can remain locked while the UI says settled.
-- [ ] **Verify TxLINE on-chain.** The contract does not CPI into TxLINE's `validateStatV2` instruction. A final `game_finalised` score record, its real sequence, proof timestamp, daily scores root PDA, and the ordered `statKeys=1,2` proof must determine settlement.
-- [ ] **Bind payouts to the winner.** `winner_token_account` is not constrained to be owned by the selected creator/counterparty. A keeper can currently redirect vault funds to another token account.
-- [ ] **Bind rent refunds to the creator.** The settlement `creator` account is not constrained to `escrow.creator`.
-- [ ] **Enforce Circle USDC.** The program accepts any SPL mint, while the database and UI label every challenge as USDC. The accepted mint must be stored in global config and enforced in create, accept, settle, and cancel.
-- [ ] **Add a post-accept recovery path.** There is no timeout/refund or dispute path if the keeper becomes unavailable after both wallets fund.
-- [ ] **Finish the keeper.** It must validate the proof, settle on-chain, wait for confirmation, then record `settle_tx`, proof, winner, and notifications. The database must never lead the chain.
+- [x] **Replace database-only settlement in the branch.** Contract v2 and the API still need coordinated devnet and production deployment.
+- [x] **Verify TxLINE on-chain in contract v2.** Deployment and a real proof test are still pending.
+- [x] **Bind payouts to the winner in contract v2.** Independent review is still pending.
+- [x] **Bind rent refunds to the creator in contract v2.** Independent review is still pending.
+- [x] **Enforce the configured mint in contract v2.** Devnet initialization with Circle USDC is still pending.
+- [x] **Add a post-accept recovery path in contract v2.** Browser recovery controls are still pending.
+- [x] **Implement the chain-first keeper.** Production deployment and a real TxLINE proof run are still pending.
 - [ ] **Deploy the current API contract.** Railway must report `capabilities.escrowVerification: true` before the frontend enables real transactions.
 - [ ] **Run the complete devnet product flow.** Use two browser wallets, Circle devnet USDC, the production-like API, a real TxLINE `game_finalised` proof, and the keeper. Preserve all three transaction signatures and the receipt.
 - [ ] **Resolve build/toolchain warnings and audit contract v2.** Pin compatible Solana/Anchor versions, get a clean deploy build, add adversarial tests, and obtain an independent security review before real funds.
@@ -50,9 +72,9 @@ Sources: [TxLINE mainnet program reference](https://github.com/txodds/tx-on-chai
 
 ## Safe Promotion Sequence
 
-1. Fix the contract account constraints and add TxLINE CPI settlement.
+1. Independently review the implemented contract v2 constraints and TxLINE CPI settlement.
 2. Deploy contract v2 to devnet under a multisig-controlled upgrade authority.
-3. Replace the database-only poller with the keeper transaction flow.
+3. Deploy the implemented chain-first keeper transaction flow with the v2 API.
 4. Pass unit, adversarial, local-validator, and real devnet end-to-end tests.
 5. Deploy the API capability contract and test the web with two wallets.
 6. Complete security and legal reviews.

@@ -1,113 +1,311 @@
-/**
- * Stakely Escrow — devnet integration tests
- * Run: npm test
- *
- * Requires the configured authority to have devnet SOL. The test creates a
- * temporary six-decimal token mint so it never touches real USDC.
- */
 import * as anchor from "@coral-xyz/anchor";
 import assert from "node:assert/strict";
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
-import { getOrCreateAssociatedTokenAccount, mintTo, createMint, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+} from "@solana/web3.js";
+import {
+  createMint,
+  getOrCreateAssociatedTokenAccount,
+  mintTo,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 
-describe("stakely-escrow", () => {
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
+
+describe("stakely-escrow-v2", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
   const program: any = anchor.workspace.StakelyEscrow;
-  const keeper = (provider.wallet as any).payer as Keypair;
+  const authority = (provider.wallet as any).payer as Keypair;
+  const creator = Keypair.generate();
+  const counterparty = Keypair.generate();
+  const amount = 5_000_000;
+  const fixtureId = new anchor.BN(18_175_981);
+  const betId = `v2_${Date.now()}`;
 
-  let usdcMint:   PublicKey;
-  let creator:    Keypair;
-  let counterparty: Keypair;
-  let creatorAta:    any;
-  let counterpartyAta: any;
+  let mint: PublicKey;
+  let creatorAta: PublicKey;
+  let counterpartyAta: PublicKey;
+  let refundAfter: anchor.BN;
 
-  const BET_ID = `test_bet_${Date.now()}`;
-  const AMOUNT = 5_000_000; // 5 USDC (6 decimals)
+  const [globalConfig] = PublicKey.findProgramAddressSync(
+    [Buffer.from("global_config_v2")],
+    program.programId,
+  );
+  const [programData] = PublicKey.findProgramAddressSync(
+    [program.programId.toBuffer()],
+    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+  );
+  const [escrow] = PublicKey.findProgramAddressSync(
+    [Buffer.from("escrow"), Buffer.from(betId)],
+    program.programId,
+  );
+  const [vault] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), Buffer.from(betId)],
+    program.programId,
+  );
 
   before(async () => {
-    creator      = Keypair.generate();
-    counterparty = Keypair.generate();
-
-    // Fund both throwaway wallets from the devnet test authority. This avoids
-    // rate-limited faucets and keeps the test deterministic.
     await provider.sendAndConfirm(new Transaction().add(
-      SystemProgram.transfer({ fromPubkey: keeper.publicKey, toPubkey: creator.publicKey, lamports: 0.1 * LAMPORTS_PER_SOL }),
-      SystemProgram.transfer({ fromPubkey: keeper.publicKey, toPubkey: counterparty.publicKey, lamports: 0.1 * LAMPORTS_PER_SOL }),
+      SystemProgram.transfer({
+        fromPubkey: authority.publicKey,
+        toPubkey: creator.publicKey,
+        lamports: 0.1 * LAMPORTS_PER_SOL,
+      }),
+      SystemProgram.transfer({
+        fromPubkey: authority.publicKey,
+        toPubkey: counterparty.publicKey,
+        lamports: 0.1 * LAMPORTS_PER_SOL,
+      }),
     ));
 
-    // Create mock USDC
-    usdcMint = await createMint(provider.connection, keeper, keeper.publicKey, null, 6);
+    mint = await createMint(provider.connection, authority, authority.publicKey, null, 6);
+    creatorAta = (await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      creator,
+      mint,
+      creator.publicKey,
+    )).address;
+    counterpartyAta = (await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      counterparty,
+      mint,
+      counterparty.publicKey,
+    )).address;
+    await mintTo(provider.connection, authority, mint, creatorAta, authority, amount * 2);
+    await mintTo(provider.connection, authority, mint, counterpartyAta, authority, amount * 2);
 
-    // Create ATAs + fund them
-    creatorAta     = await getOrCreateAssociatedTokenAccount(provider.connection, creator, usdcMint, creator.publicKey);
-    counterpartyAta = await getOrCreateAssociatedTokenAccount(provider.connection, counterparty, usdcMint, counterparty.publicKey);
-
-    await mintTo(provider.connection, keeper, usdcMint, creatorAta.address,     keeper, AMOUNT * 2);
-    await mintTo(provider.connection, keeper, usdcMint, counterpartyAta.address, keeper, AMOUNT * 2);
+    refundAfter = new anchor.BN(Math.floor(Date.now() / 1000) + 3_605);
   });
 
-  it("initializes global config", async () => {
-    const [globalConfig] = PublicKey.findProgramAddressSync([Buffer.from("global_config")], program.programId);
-    try {
-      await program.methods.initialize(keeper.publicKey).accounts({
-        payer: keeper.publicKey, globalConfig, systemProgram: anchor.web3.SystemProgram.programId,
-      }).rpc();
-    } catch { /* already initialized */ }
+  it("blocks initialization by a wallet that is not the upgrade authority", async () => {
+    await assert.rejects(
+      program.methods
+        .initialize(creator.publicKey)
+        .accounts({
+          payer: creator.publicKey,
+          globalConfig,
+          acceptedMint: mint,
+          txlineProgram: program.programId,
+          program: program.programId,
+          programData,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([creator])
+        .rpc(),
+      /Not authorized|Unauthorized|constraint/i,
+    );
+  });
+
+  it("pins the accepted mint and TxLINE program in global config", async () => {
+    await program.methods
+      .initialize(authority.publicKey)
+      .accounts({
+        payer: authority.publicKey,
+        globalConfig,
+        acceptedMint: mint,
+        txlineProgram: program.programId,
+        program: program.programId,
+        programData,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
     const config = await program.account.globalConfig.fetch(globalConfig);
-    assert.equal(config.authority.toBase58(), keeper.publicKey.toBase58());
+    assert.equal(config.authority.toBase58(), authority.publicKey.toBase58());
+    assert.equal(config.acceptedMint.toBase58(), mint.toBase58());
+    assert.equal(config.txlineProgram.toBase58(), program.programId.toBase58());
   });
 
-  it("creates escrow and locks creator funds", async () => {
-    const [escrow] = PublicKey.findProgramAddressSync([Buffer.from("escrow"), Buffer.from(BET_ID)], program.programId);
-    const [vault]  = PublicKey.findProgramAddressSync([Buffer.from("vault"),  Buffer.from(BET_ID)], program.programId);
+  it("rejects an unapproved token mint", async () => {
+    const wrongMint = await createMint(provider.connection, authority, authority.publicKey, null, 6);
+    const wrongAta = (await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      creator,
+      wrongMint,
+      creator.publicKey,
+    )).address;
+    const wrongBetId = `bad_${Date.now()}`;
+    const [wrongEscrow] = PublicKey.findProgramAddressSync(
+      [Buffer.from("escrow"), Buffer.from(wrongBetId)],
+      program.programId,
+    );
+    const [wrongVault] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), Buffer.from(wrongBetId)],
+      program.programId,
+    );
 
-    const signature = await program.methods.createEscrow(BET_ID, new anchor.BN(AMOUNT), 0).accounts({
-      creator: creator.publicKey, escrow, usdcMint, vault,
-      creatorTokenAccount: creatorAta.address,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      systemProgram: anchor.web3.SystemProgram.programId,
-      rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-    }).signers([creator]).rpc();
-    console.log(`      create: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+    await assert.rejects(
+      program.methods
+        .createEscrow(wrongBetId, fixtureId, true, new anchor.BN(amount), 0, refundAfter)
+        .accounts({
+          creator: creator.publicKey,
+          globalConfig,
+          acceptedMint: wrongMint,
+          escrow: wrongEscrow,
+          vault: wrongVault,
+          creatorTokenAccount: wrongAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([creator])
+        .rpc(),
+      /configured token mint|ConstraintAddress/i,
+    );
+  });
+
+  it("creates a fixture-bound escrow with the approved mint", async () => {
+    await program.methods
+      .createEscrow(betId, fixtureId, true, new anchor.BN(amount), 0, refundAfter)
+      .accounts({
+        creator: creator.publicKey,
+        globalConfig,
+        acceptedMint: mint,
+        escrow,
+        vault,
+        creatorTokenAccount: creatorAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([creator])
+      .rpc();
 
     const state = await program.account.escrowState.fetch(escrow);
-    assert.equal(state.status, 0); // Created
-    assert.equal(state.amount.toNumber(), AMOUNT);
+    assert.equal(state.fixtureId.toString(), fixtureId.toString());
+    assert.equal(state.participant1IsHome, true);
+    assert.equal(state.mint.toBase58(), mint.toBase58());
+    assert.equal(state.amount.toNumber(), amount);
+    assert.equal(state.status, 0);
   });
 
-  it("counterparty accepts and vault holds 2x", async () => {
-    const [escrow] = PublicKey.findProgramAddressSync([Buffer.from("escrow"), Buffer.from(BET_ID)], program.programId);
-    const [vault]  = PublicKey.findProgramAddressSync([Buffer.from("vault"),  Buffer.from(BET_ID)], program.programId);
+  it("rejects self-acceptance and accepts a real counterparty", async () => {
+    await assert.rejects(
+      program.methods
+        .acceptEscrow(betId)
+        .accounts({
+          counterparty: creator.publicKey,
+          escrow,
+          vault,
+          counterpartyTokenAccount: creatorAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([creator])
+        .rpc(),
+      /own challenge|SelfBet/i,
+    );
 
-    const signature = await program.methods.acceptEscrow(BET_ID).accounts({
-      counterparty: counterparty.publicKey, escrow, vault,
-      counterpartyTokenAccount: counterpartyAta.address,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    }).signers([counterparty]).rpc();
-    console.log(`      accept: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+    await program.methods
+      .acceptEscrow(betId)
+      .accounts({
+        counterparty: counterparty.publicKey,
+        escrow,
+        vault,
+        counterpartyTokenAccount: counterpartyAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([counterparty])
+      .rpc();
 
-    const vaultAccount = await provider.connection.getTokenAccountBalance(vault);
-    assert.equal(parseInt(vaultAccount.value.amount), AMOUNT * 2);
+    const state = await program.account.escrowState.fetch(escrow);
+    const vaultBalance = await provider.connection.getTokenAccountBalance(vault);
+    assert.equal(state.counterparty.toBase58(), counterparty.publicKey.toBase58());
+    assert.equal(state.status, 1);
+    assert.equal(Number(vaultBalance.value.amount), amount * 2);
   });
 
-  it("keeper settles — winner receives full vault", async () => {
-    const [escrow]      = PublicKey.findProgramAddressSync([Buffer.from("escrow"), Buffer.from(BET_ID)], program.programId);
-    const [vault]       = PublicKey.findProgramAddressSync([Buffer.from("vault"),  Buffer.from(BET_ID)], program.programId);
-    const [globalConfig] = PublicKey.findProgramAddressSync([Buffer.from("global_config")], program.programId);
-
-    const beforeBalance = parseInt((await provider.connection.getTokenAccountBalance(creatorAta.address)).value.amount);
-
-    const signature = await program.methods.settleEscrow(BET_ID, creator.publicKey).accounts({
-      authority: keeper.publicKey, globalConfig, escrow, vault,
-      winnerTokenAccount: creatorAta.address,
-      creator: creator.publicKey,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    }).rpc();
-    console.log(`      settle: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
-
-    const afterBalance = parseInt((await provider.connection.getTokenAccountBalance(creatorAta.address)).value.amount);
-    assert.equal(afterBalance - beforeBalance, AMOUNT * 2);
+  it("rejects a redirected creator payout account before proof validation", async () => {
+    await assert.rejects(
+      program.methods
+        .settleEscrow(betId, fakeFinalProof())
+        .accounts({
+          settler: authority.publicKey,
+          globalConfig,
+          txlineProgram: program.programId,
+          dailyScoresMerkleRoots: escrow,
+          escrow,
+          vault,
+          creatorTokenAccount: counterpartyAta,
+          counterpartyTokenAccount: counterpartyAta,
+          creator: creator.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc(),
+      /token authority|ConstraintTokenOwner/i,
+    );
   });
+
+  it("rejects an unverified final-score proof without moving funds", async () => {
+    await assert.rejects(
+      program.methods
+        .settleEscrow(betId, fakeFinalProof())
+        .accounts({
+          settler: authority.publicKey,
+          globalConfig,
+          txlineProgram: program.programId,
+          dailyScoresMerkleRoots: escrow,
+          escrow,
+          vault,
+          creatorTokenAccount: creatorAta,
+          counterpartyTokenAccount: counterpartyAta,
+          creator: creator.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc(),
+    );
+
+    const vaultBalance = await provider.connection.getTokenAccountBalance(vault);
+    assert.equal(Number(vaultBalance.value.amount), amount * 2);
+  });
+
+  it("keeps both stakes locked before the recovery deadline", async () => {
+    await assert.rejects(
+      program.methods
+        .refundExpired(betId)
+        .accounts({
+          caller: counterparty.publicKey,
+          escrow,
+          vault,
+          creatorTokenAccount: creatorAta,
+          counterpartyTokenAccount: counterpartyAta,
+          creator: creator.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([counterparty])
+        .rpc(),
+      /not available yet|RefundNotAvailable/i,
+    );
+
+    const vaultBalance = await provider.connection.getTokenAccountBalance(vault);
+    assert.equal(Number(vaultBalance.value.amount), amount * 2);
+  });
+
+  function fakeFinalProof() {
+    const zeroHash = Array.from({ length: 32 }, () => 0);
+    return {
+      ts: new anchor.BN(Date.now()),
+      fixtureSummary: {
+        fixtureId,
+        updateStats: {
+          updateCount: 1,
+          minTimestamp: new anchor.BN(Date.now()),
+          maxTimestamp: new anchor.BN(Date.now()),
+        },
+        eventsSubTreeRoot: zeroHash,
+      },
+      fixtureProof: [],
+      mainTreeProof: [],
+      eventStatRoot: zeroHash,
+      stats: [
+        { stat: { key: 1, value: 2, period: 100 }, statProof: [] },
+        { stat: { key: 2, value: 1, period: 100 }, statProof: [] },
+      ],
+    };
+  }
 });

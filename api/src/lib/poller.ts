@@ -1,13 +1,31 @@
 import { db } from "./supabase.js";
 import { txline } from "./txline.js";
 import { notifySettlement, notifyLosing, notifyMatchSoon } from "./telegram.js";
+import { settleEscrowOnChain } from "./keeper.js";
 
 const POLL_MS       = 3 * 60 * 1000;   // poll every 3 min
 const ROAST_COOL_MS = 15 * 60 * 1000;  // max one roast per bet per 15 min
 const lastRoasted   = new Map<string, number>();
+let tickRunning = false;
 // pinged_soon state is persisted in the matches table — survives redeployments
 
 const FINISH_STATES = new Set(["finished", "FT", "AET", "PEN", "Ended", "ended"]);
+
+async function writeWithRetry(
+  label: string,
+  write: () => PromiseLike<{ error: unknown }>,
+) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const { error } = await write();
+    if (!error) return;
+    lastError = error;
+    if (attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+    }
+  }
+  throw new Error(`${label}: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
 
 // ── Main tick ─────────────────────────────────────────────────────────────────
 // Map TxLINE GameState to our status
@@ -21,6 +39,8 @@ function mapGameState(gs: string): string {
 }
 
 async function tick() {
+  if (tickRunning) return;
+  tickRunning = true;
   try {
     // Auto-transition: matches past kickoff still "scheduled" — check TxLINE for real status
     const nowTs = new Date().toISOString();
@@ -49,7 +69,7 @@ async function tick() {
 
     const { data: liveMatches } = await db
       .from("matches")
-      .select("id,home_team,away_team,status,home_score,away_score")
+      .select("id,home_team,away_team,status,home_score,away_score,participant1_is_home")
       .in("status", ["live", "halftime"]);
 
     if (!liveMatches?.length) return;
@@ -68,7 +88,19 @@ async function tick() {
       }).eq("id", match.id);
 
       if (FINISH_STATES.has(score.status)) {
-        await settleBetsForMatch(match.id, match.home_team, match.away_team, score.homeScore, score.awayScore, score.merkleProof);
+        if (!score.finalised || !score.seq) {
+          console.warn("[poller] refusing settlement without game_finalised period 100 record:", match.id);
+          return;
+        }
+        const proof = await txline.getSettlementProof(match.id, score.seq);
+        await settleBetsForMatch(
+          match.id,
+          match.home_team,
+          match.away_team,
+          Boolean(match.participant1_is_home),
+          score.seq,
+          proof,
+        );
       } else {
         await roastLosers(match.id, match.home_team, match.away_team, score.homeScore, score.awayScore, score.minute);
       }
@@ -76,69 +108,115 @@ async function tick() {
     await pingUpcomingMatches();
   } catch (e: any) {
     console.error("[poller] tick error:", e.message);
+  } finally {
+    tickRunning = false;
   }
 }
 
 // ── Auto-settlement ───────────────────────────────────────────────────────────
 async function settleBetsForMatch(
-  matchId: string, homeTeam: string, awayTeam: string,
-  homeScore: number, awayScore: number,
-  merkleProof?: unknown
+  matchId: string,
+  homeTeam: string,
+  awayTeam: string,
+  participant1IsHome: boolean,
+  txlineSeq: number,
+  merkleProof: unknown,
 ) {
   const { data: bets } = await db.from("bets")
-    .select(`id, creator_side, amount_usdc,
-      creator:users!bets_creator_id_fkey(id,telegram_id,display_name),
-      counterparty:users!bets_counterparty_id_fkey(id,telegram_id,display_name)`)
+    .select(`id, creator_side, amount_usdc, escrow_pda,
+      creator:users!bets_creator_id_fkey(id,telegram_id,display_name,wallet_address),
+      counterparty:users!bets_counterparty_id_fkey(id,telegram_id,display_name,wallet_address)`)
     .eq("match_id", matchId)
     // A challenge is only settleable after both sides have funded escrow.
     .in("status", ["locked", "live"]);
 
   if (!bets?.length) return;
 
-  // Store Merkle proof on the match record — cryptographic receipt of the result
-  if (merkleProof) {
-    await db.from("matches").update({
-      merkle_proof:      merkleProof,
-      merkle_stored_at:  new Date().toISOString(),
-    }).eq("id", matchId);
-  }
-
-  const result: "home" | "away" | "draw" =
-    homeScore > awayScore ? "home" : awayScore > homeScore ? "away" : "draw";
-  const winTeam = result === "home" ? homeTeam : result === "away" ? awayTeam : "Draw";
-
-  await Promise.all(bets.map(async (bet) => {
+  let settledCount = 0;
+  for (const bet of bets) {
     const creator      = bet.creator      as any;
     const counterparty = bet.counterparty as any;
-    const creatorWon   = bet.creator_side === result;
-    const winner       = creatorWon ? creator      : counterparty;
-    const loser        = creatorWon ? counterparty : creator;
-
-    await db.from("bets").update({
-      status:     "settled",
-      winner_id:  winner?.id ?? null,
-      settled_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).eq("id", bet.id);
-
-    if (winner?.id && loser?.id) {
-      await Promise.all([
-        db.rpc("increment_streak_win", { user_id: winner.id }),
-        db.rpc("reset_streak_loss",    { user_id: loser.id }),
-      ]);
+    if (!creator?.wallet_address || !counterparty?.wallet_address || !bet.escrow_pda) {
+      console.error("[poller] funded bet is missing an escrow party:", bet.id);
+      continue;
     }
 
-    await notifySettlement(
-      winner?.telegram_id ?? null,
-      loser?.telegram_id  ?? null,
-      winner?.display_name ?? "anon",
-      loser?.display_name  ?? "anon",
-      bet.amount_usdc,
-      winTeam,
-    );
-  }));
+    const attemptedAt = new Date().toISOString();
+    try {
+      const settlement = await settleEscrowOnChain({
+        betId: bet.id,
+        fixtureId: matchId,
+        creatorSide: bet.creator_side,
+        participant1IsHome,
+        creator,
+        counterparty,
+        proof: merkleProof,
+      });
+      const winner = settlement.winnerId === creator.id ? creator : counterparty;
+      const loser = settlement.winnerId === creator.id ? counterparty : creator;
+      const winTeam = settlement.result === "home"
+        ? homeTeam
+        : settlement.result === "away"
+          ? awayTeam
+          : "Draw";
 
-  console.log(`[poller] settled ${bets.length} bet(s) — match ${matchId} ${homeScore}-${awayScore}`);
+      // The chain is authoritative. Persist its receipt before any secondary data
+      // so a transient match or notification failure cannot trigger a second payout.
+      await writeWithRetry("failed to persist settlement receipt", () => db.from("bets").update({
+        status: "settled",
+        settle_tx: settlement.signature,
+        winner_id: settlement.winnerId,
+        txline_seq: txlineSeq,
+        daily_scores_root: settlement.dailyScoresRoot,
+        settlement_error: null,
+        settlement_attempted_at: attemptedAt,
+        settled_at: attemptedAt,
+        updated_at: attemptedAt,
+      }).eq("id", bet.id));
+      settledCount += 1;
+
+      try {
+        await writeWithRetry("failed to persist TxLINE match proof", () => db.from("matches").update({
+          home_score: settlement.homeScore,
+          away_score: settlement.awayScore,
+          result: settlement.result,
+          merkle_proof: merkleProof,
+          merkle_stored_at: attemptedAt,
+        }).eq("id", matchId));
+      } catch (proofSyncError) {
+        const message = proofSyncError instanceof Error ? proofSyncError.message : String(proofSyncError);
+        await db.from("bets").update({ settlement_error: message }).eq("id", bet.id);
+        console.error("[poller] chain settled but match proof sync failed:", bet.id, message);
+      }
+
+      try {
+        await Promise.all([
+          db.rpc("increment_streak_win", { user_id: winner.id }),
+          db.rpc("reset_streak_loss", { user_id: loser.id }),
+        ]);
+        await notifySettlement(
+          winner.telegram_id ?? null,
+          loser.telegram_id ?? null,
+          winner.display_name ?? "anon",
+          loser.display_name ?? "anon",
+          bet.amount_usdc,
+          winTeam,
+        );
+      } catch (sideEffectError) {
+        console.error("[poller] settlement recorded but follow-up failed:", bet.id, sideEffectError);
+      }
+    } catch (settlementError) {
+      const message = settlementError instanceof Error ? settlementError.message : "Unknown settlement failure";
+      await db.from("bets").update({
+        settlement_error: message,
+        settlement_attempted_at: attemptedAt,
+        updated_at: attemptedAt,
+      }).eq("id", bet.id);
+      console.error("[poller] settlement failed:", bet.id, message);
+    }
+  }
+
+  console.log(`[poller] settled ${settledCount}/${bets.length} bet(s) on-chain — match ${matchId}`);
 }
 
 // ── Mid-game roasting ─────────────────────────────────────────────────────────

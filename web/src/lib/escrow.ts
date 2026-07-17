@@ -3,7 +3,6 @@ import {
   clusterApiUrl,
   Connection,
   PublicKey,
-  SYSVAR_RENT_PUBKEY,
   SystemProgram,
   type Transaction,
   type VersionedTransaction,
@@ -32,8 +31,18 @@ function onchainBetId(betId: string) {
 }
 
 export async function getEscrowProgramStatus() {
-  const account = await connection.getAccountInfo(ESCROW_PROGRAM_ID);
-  return { deployed: Boolean(account?.executable), programId: ESCROW_PROGRAM_ID.toBase58() };
+  const [globalConfig] = PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode("global_config_v2")],
+    ESCROW_PROGRAM_ID,
+  );
+  const [programAccount, configAccount] = await Promise.all([
+    connection.getAccountInfo(ESCROW_PROGRAM_ID),
+    connection.getAccountInfo(globalConfig),
+  ]);
+  return {
+    deployed: Boolean(programAccount?.executable && configAccount?.owner.equals(ESCROW_PROGRAM_ID)),
+    programId: ESCROW_PROGRAM_ID.toBase58(),
+  };
 }
 
 export async function createEscrowChallenge(input: {
@@ -42,6 +51,9 @@ export async function createEscrowChallenge(input: {
   betId: string;
   amountUsdc: number;
   side: BetSide;
+  fixtureId: string;
+  participant1IsHome: boolean;
+  refundAfter: number;
 }) {
   const programAccount = await connection.getAccountInfo(ESCROW_PROGRAM_ID);
   if (!programAccount?.executable) throw new Error("Stakely escrow is not deployed on devnet.");
@@ -79,19 +91,30 @@ export async function createEscrowChallenge(input: {
     [new TextEncoder().encode("vault"), betSeed],
     ESCROW_PROGRAM_ID,
   );
+  const [globalConfig] = PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode("global_config_v2")],
+    ESCROW_PROGRAM_ID,
+  );
 
   const amount = new BN(Math.round(input.amountUsdc * 1_000_000));
   const signature = await program.methods
-    .createEscrow(escrowBetId, amount, sideNumbers[input.side])
+    .createEscrow(
+      escrowBetId,
+      new BN(input.fixtureId),
+      input.participant1IsHome,
+      amount,
+      sideNumbers[input.side],
+      new BN(input.refundAfter),
+    )
     .accounts({
       creator: input.publicKey,
+      globalConfig,
+      acceptedMint: DEVNET_USDC_MINT,
       escrow,
-      usdcMint: DEVNET_USDC_MINT,
       vault,
       creatorTokenAccount,
       tokenProgram: TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
-      rent: SYSVAR_RENT_PUBKEY,
     })
     .rpc();
 

@@ -19,6 +19,7 @@ async function syncFixtures() {
     away_team: f.awayTeam,
     home_team_code: f.homeTeamCode,
     away_team_code: f.awayTeamCode,
+    participant1_is_home: f.participant1IsHome,
     kickoff_at: f.kickoffAt,
     status: f.status,
   }));

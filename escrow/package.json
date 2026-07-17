@@ -6,11 +6,10 @@
     "build": "anchor build",
     "deploy": "tsx scripts/deploy.ts",
     "preflight:mainnet": "tsx scripts/mainnet-preflight.ts",
-    "settle": "tsx scripts/settle.ts",
-    "test": "anchor test --skip-local-validator --skip-deploy"
+    "test": "anchor test"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.31.0",
+    "@coral-xyz/anchor": "^0.31.1",
     "@solana/spl-token": "^0.4.13",
     "@solana/web3.js": "^1.98.2"
   },

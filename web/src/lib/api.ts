@@ -10,6 +10,7 @@ export type Match = {
   away_team: string;
   home_team_code: string | null;
   away_team_code: string | null;
+  participant1_is_home: boolean;
   kickoff_at: string;
   status: string;
   home_score: number;
@@ -49,6 +50,10 @@ export type Bet = {
   settle_tx?: string | null;
   winner_id?: string | null;
   expires_at?: string | null;
+  refund_after?: string | null;
+  txline_seq?: number | null;
+  daily_scores_root?: string | null;
+  settlement_error?: string | null;
   settled_at?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -77,6 +82,7 @@ export type Health = {
   capabilities?: {
     escrowVerification?: boolean;
     contractVersion?: string;
+    txlineProofSettlement?: boolean;
   };
 };
 
@@ -131,6 +137,7 @@ export const stakelyApi = {
       match_id: string;
       creator_side: BetSide;
       amount_usdc: number;
+      refund_after: string;
       escrow_pda: string;
       create_tx: string;
     },
