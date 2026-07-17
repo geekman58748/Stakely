@@ -46,20 +46,23 @@ app.get("/api/health", (_req, res) => {
 
 // ── Web Frontend (hash-router SPA) ────────────────────────────────────────────
 // Pre-built web SPA lives in api/web-dist/ (committed to repo).
-// __dirname = api/dist at runtime → ../web-dist
-import { existsSync } from "fs";
+// Load index.html into memory at startup to avoid per-request fs calls.
+import { existsSync, readFileSync } from "fs";
 const WEB_DIST = path.join(__dirname, "..", "web-dist");
-console.log(`[web] WEB_DIST=${WEB_DIST} exists=${existsSync(WEB_DIST)}`);
-app.use(express.static(WEB_DIST));
-// SPA fallback — serve index.html for any non-API route
-app.use((_req, res, next) => {
-  const idx = path.join(WEB_DIST, "index.html");
-  res.sendFile(idx, (err) => {
-    if (err) {
-      console.error("[web] sendFile failed:", err.message, "path:", idx);
-      res.status(500).send("Frontend unavailable — " + err.message);
-    }
-  });
+const INDEX_HTML_PATH = path.join(WEB_DIST, "index.html");
+console.log(`[web] WEB_DIST=${WEB_DIST} exists=${existsSync(WEB_DIST)} index=${existsSync(INDEX_HTML_PATH)}`);
+let indexHtml = "";
+try { indexHtml = readFileSync(INDEX_HTML_PATH, "utf8"); } catch (e: any) { console.error("[web] Could not read index.html:", e.message); }
+
+app.use(express.static(WEB_DIST, { fallthrough: true }));
+// SPA fallback — all non-API routes serve the cached index.html
+app.use((_req, res) => {
+  if (indexHtml) {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(indexHtml);
+  } else {
+    res.status(503).send("Frontend build missing. Check api/web-dist/");
+  }
 });
 
 // ── Express error handler ─────────────────────────────────────────────────────
