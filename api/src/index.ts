@@ -47,11 +47,25 @@ app.get("/api/health", (_req, res) => {
 // ── Web Frontend (hash-router SPA) ────────────────────────────────────────────
 // Pre-built web SPA lives in api/web-dist/ (committed to repo).
 // __dirname = api/dist at runtime → ../web-dist
+import { existsSync } from "fs";
 const WEB_DIST = path.join(__dirname, "..", "web-dist");
+console.log(`[web] WEB_DIST=${WEB_DIST} exists=${existsSync(WEB_DIST)}`);
 app.use(express.static(WEB_DIST));
-// SPA fallback — hash routes never hit the server, but serve index.html for /
-app.use((_req, res) => {
-  res.sendFile(path.join(WEB_DIST, "index.html"));
+// SPA fallback — serve index.html for any non-API route
+app.use((_req, res, next) => {
+  const idx = path.join(WEB_DIST, "index.html");
+  res.sendFile(idx, (err) => {
+    if (err) {
+      console.error("[web] sendFile failed:", err.message, "path:", idx);
+      res.status(500).send("Frontend unavailable — " + err.message);
+    }
+  });
+});
+
+// ── Express error handler ─────────────────────────────────────────────────────
+app.use((err: any, _req: any, res: any, _next: any) => {
+  console.error("[express error]", err.message);
+  res.status(500).json({ error: err.message });
 });
 
 // ── Startup ───────────────────────────────────────────────────────────────────
