@@ -13,13 +13,18 @@ import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-tok
 const PROGRAM_ID = new PublicKey(
   process.env.ESCROW_PROGRAM_ID ?? "J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai",
 );
+
+// Devnet USDC (Circle devnet): 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+// Mainnet USDC (Circle):       EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
 const USDC_MINT = new PublicKey(
   process.env.USDC_MINT ?? "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
 );
+
 export const connection = new Connection(
   process.env.SOLANA_RPC_URL ?? clusterApiUrl("devnet"),
   "confirmed",
 );
+
 const sideNumbers: Record<string, number> = { home: 0, draw: 1, away: 2 };
 
 type EscrowState = {
@@ -59,12 +64,14 @@ export function decodeEscrow(data: Buffer): EscrowState {
   return { betId, creator, counterparty, amount, creatorSide, status };
 }
 
+const NETWORK_LABEL = process.env.SOLANA_RPC_URL?.includes("mainnet") ? "mainnet-beta" : "devnet";
+
 async function requireConfirmedSignature(signature: string) {
   const status = (await connection.getSignatureStatuses([signature], {
     searchTransactionHistory: true,
   })).value[0];
   if (!status || status.err || !["confirmed", "finalized"].includes(status.confirmationStatus ?? "")) {
-    throw new Error("Escrow transaction is not confirmed on devnet");
+    throw new Error(`Escrow transaction is not confirmed on Solana ${NETWORK_LABEL}`);
   }
 }
 
@@ -128,8 +135,8 @@ export async function settleOnChain(betId: string, winnerWallet: string): Promis
   const keeper = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(rawKey)));
   const escrowBetId = onchainBetId(betId);
 
-  const [escrowPda] = PublicKey.findProgramAddressSync([Buffer.from("escrow"), Buffer.from(escrowBetId)], PROGRAM_ID);
-  const [vaultPda]  = PublicKey.findProgramAddressSync([Buffer.from("vault"),  Buffer.from(escrowBetId)], PROGRAM_ID);
+  const [escrowPda]    = PublicKey.findProgramAddressSync([Buffer.from("escrow"),        Buffer.from(escrowBetId)], PROGRAM_ID);
+  const [vaultPda]     = PublicKey.findProgramAddressSync([Buffer.from("vault"),         Buffer.from(escrowBetId)], PROGRAM_ID);
   const [globalConfig] = PublicKey.findProgramAddressSync([Buffer.from("global_config")], PROGRAM_ID);
 
   const account = await connection.getAccountInfo(escrowPda, "confirmed");
@@ -142,7 +149,7 @@ export async function settleOnChain(betId: string, winnerWallet: string): Promis
     return "already_settled";
   }
 
-  const winner = new PublicKey(winnerWallet);
+  const winner    = new PublicKey(winnerWallet);
   const winnerAta = getAssociatedTokenAddressSync(USDC_MINT, winner);
 
   // Borsh encode: discriminator + String (u32 LE len + bytes) + Pubkey (32 bytes)
