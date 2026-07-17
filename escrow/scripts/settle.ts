@@ -30,7 +30,7 @@ async function settleEscrow(betId: string, winnerPubkey: PublicKey) {
   const [vaultPda]     = PublicKey.findProgramAddressSync([Buffer.from("vault"),  Buffer.from(escrowBetId)], program.programId);
   const [globalConfig] = PublicKey.findProgramAddressSync([Buffer.from("global_config")], program.programId);
 
-  const escrow = await program.account.escrowState.fetch(escrowPda);
+  const escrow = await (program.account as any).escrowState.fetch(escrowPda);
   const winnerAta = getAssociatedTokenAddressSync(USDC_DEVNET, winnerPubkey);
 
   const sig = await program.methods

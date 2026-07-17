@@ -8,6 +8,8 @@
 
 This is the direct handoff between Ola's web work and Maxx's backend work. It records what is already built, what is still hardcoded, the API contract the frontend now expects, and the exact tasks Maxx needs to complete before the hackathon demo is end-to-end.
 
+Mainnet is currently a **no-go for real funds**. Read `MAINNET_READINESS.md` for the verified devnet result, official mainnet addresses, security findings, and promotion checklist.
+
 The immediate target is a judge-ready flow:
 
 1. A user finds a real TxLINE fixture.
