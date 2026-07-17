@@ -17,7 +17,7 @@ import { txlineMode } from "./lib/txline.js";
 process.on('uncaughtException', (err) => console.error('[uncaughtException]', err));
 process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', err));
 const app  = express();
-const PORT = process.env.PORT ?? 4000;
+const PORT = Number(process.env.PORT ?? 4000);
 
 app.use(cors());
 app.use(express.json());
