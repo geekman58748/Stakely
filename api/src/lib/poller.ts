@@ -1,7 +1,12 @@
 import { db } from "./supabase.js";
 import { txline } from "./txline.js";
 import { notifySettlement, notifyLosing, notifyMatchSoon } from "./telegram.js";
-import { settleOnChain } from "./escrow.js";
+// Lazy-load escrow to avoid blocking startup on Solana module load
+let _settleOnChain: typeof import("./escrow.js")["settleOnChain"] | null = null;
+async function getSettleOnChain() {
+  if (!_settleOnChain) _settleOnChain = (await import("./escrow.js")).settleOnChain;
+  return _settleOnChain;
+}
 
 const POLL_MS       = 3 * 60 * 1000;
 const ROAST_COOL_MS = 15 * 60 * 1000;
@@ -103,7 +108,7 @@ async function settleBetsForMatch(
       let settle_tx: string | null = null;
       if (bet.escrow_pda && winner.wallet_address) {
         try {
-          settle_tx = await settleOnChain(bet.id, winner.wallet_address);
+          settle_tx = await (await getSettleOnChain())(bet.id, winner.wallet_address);
           console.log("[keeper] on-chain settlement tx:", settle_tx, "for bet", bet.id);
         } catch (chainErr: any) {
           console.error("[keeper] on-chain settlement FAILED for bet", bet.id, ":", chainErr.message);

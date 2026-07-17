@@ -12,6 +12,10 @@ import { registerWebhook } from "./lib/telegram.js";
 import { startPoller }    from "./lib/poller.js";
 import { txlineMode } from "./lib/txline.js";
 
+
+// Prevent unhandled rejections from killing the process
+process.on('uncaughtException', (err) => console.error('[uncaughtException]', err));
+process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', err));
 const app  = express();
 const PORT = process.env.PORT ?? 4000;
 

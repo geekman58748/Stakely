@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { db } from "../lib/supabase.js";
 import { requireAuth } from "../middleware/auth.js";
-import { verifyAcceptedEscrow, verifyCreatedEscrow } from "../lib/escrow.js";
+// Lazy-load escrow so Solana import failure doesn't crash startup
+let _escrow: typeof import("../lib/escrow.js") | null = null;
+async function getEscrow() {
+  if (!_escrow) _escrow = await import("../lib/escrow.js");
+  return _escrow;
+}
 
 const router = Router();
 
@@ -81,6 +86,7 @@ router.post("/", requireAuth, async (req, res) => {
   if (!creator) { res.status(404).json({ error: "User not registered. POST /users first." }); return; }
 
   try {
+    const { verifyCreatedEscrow } = await getEscrow();
     await verifyCreatedEscrow({
       betId: id,
       escrowPda: escrow_pda,
@@ -143,6 +149,7 @@ router.patch("/:id/accept", requireAuth, async (req, res) => {
   }
 
   try {
+    const { verifyAcceptedEscrow } = await getEscrow();
     await verifyAcceptedEscrow({
       betId: bet.id,
       escrowPda: bet.escrow_pda,
