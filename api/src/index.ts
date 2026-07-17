@@ -41,9 +41,9 @@ app.get("/api/health", (_req, res) => {
 });
 
 // ── Web Frontend (hash-router SPA) ────────────────────────────────────────────
-// Compiled by 'npm run build-web' into ../web/dist before tsc runs.
-// __dirname = api/dist at runtime → ../../web/dist = web/dist
-const WEB_DIST = path.join(__dirname, "..", "..", "web", "dist");
+// Pre-built web SPA lives in api/web-dist/ (committed to repo).
+// __dirname = api/dist at runtime → ../web-dist
+const WEB_DIST = path.join(__dirname, "..", "web-dist");
 app.use(express.static(WEB_DIST));
 // SPA fallback — hash routes never hit the server, but serve index.html for /
 app.use((_req, res) => {

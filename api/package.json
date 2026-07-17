@@ -4,7 +4,7 @@
   "private": true,
   "main": "dist/index.js",
   "scripts": {
-    "build-web": "sh -c 'cd ../web && npm ci && npm run build'",
+    "build-web": "sh -c 'if [ -d ../web ]; then cd ../web && npm ci && npm run build && cp -r dist ../api/web-dist; else echo web-dist already committed, skipping build; fi'",
     "build": "npm run build-web && tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js"
