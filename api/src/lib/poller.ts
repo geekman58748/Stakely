@@ -62,7 +62,7 @@ async function tick() {
         );
       } else {
         await roastLosers(match.id, match.home_team, match.away_team,
-          score.homeScore, score.awayScore, score.minute);
+          score.homeScore, score.awayScore, score.minute ?? undefined);
       }
     }));
     await pingUpcomingMatches();
@@ -140,12 +140,21 @@ async function settleBetsForMatch(
 
       // ── Notifications ────────────────────────────────────────────────────────
       if (winner.telegram_id) {
-        notifySettlement(winner.telegram_id, winner.display_name ?? "you",
-          loser.display_name ?? "opponent", bet.amount_usdc, homeTeam, awayTeam).catch(() => null);
+        notifySettlement(
+          winner.telegram_id, null,
+          winner.display_name ?? "you", loser.display_name ?? "opponent",
+          bet.amount_usdc, result === "home" ? homeTeam : result === "away" ? awayTeam : homeTeam
+        ).catch(() => null);
       }
       if (loser.telegram_id) {
-        notifyLosing(loser.telegram_id, loser.display_name ?? "you",
-          winner.display_name ?? "opponent", bet.amount_usdc, homeTeam, awayTeam).catch(() => null);
+        notifyLosing(
+          loser.telegram_id, loser.display_name ?? "you",
+          result === "home" ? awayTeam : result === "away" ? homeTeam : awayTeam,
+          result === "home" ? homeTeam : result === "away" ? awayTeam : homeTeam,
+          result === "home" ? awayScore : homeScore,
+          result === "home" ? homeScore : awayScore,
+          null
+        ).catch(() => null);
       }
       console.log("[keeper] settled bet", bet.id, "— winner:", winner.display_name ?? winner.wallet_address);
     } catch (e: any) {
@@ -181,8 +190,13 @@ async function roastLosers(
           lastRoasted.set(`${bet.id}:${loser.telegram_id}`, now);
           const losingTeam  = bet.creator_side === "home" ? awayTeam : homeTeam;
           const leadingTeam = bet.creator_side === "home" ? homeTeam : awayTeam;
-          notifyLosing(loser.telegram_id, loser.display_name ?? "u",
-            leadingTeam, 0, losingTeam, leadingTeam).catch(() => null);
+          notifyLosing(
+            loser.telegram_id, loser.display_name ?? "u",
+            losingTeam, leadingTeam,
+            homeScore < awayScore ? homeScore : awayScore,
+            homeScore < awayScore ? awayScore : homeScore,
+            minute ?? null
+          ).catch(() => null);
         }
       }
     }
