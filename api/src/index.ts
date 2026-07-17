@@ -1,4 +1,5 @@
 import "dotenv/config";
+import path from "path";
 import express from "express";
 import cors from "cors";
 import { matchesRouter, syncFixtures } from "./routes/matches.js";
@@ -17,7 +18,7 @@ const PORT = process.env.PORT ?? 4000;
 app.use(cors());
 app.use(express.json());
 
-// ── Routes ────────────────────────────────────────────────────────────────────
+// ── API Routes ────────────────────────────────────────────────────────────────
 app.use("/api/matches",     matchesRouter);
 app.use("/api/users",       usersRouter);
 app.use("/api/bets",        betsRouter);
@@ -39,11 +40,20 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+// ── Web Frontend (hash-router SPA) ────────────────────────────────────────────
+// Compiled by 'npm run build-web' into ../web/dist before tsc runs.
+// __dirname = api/dist at runtime → ../../web/dist = web/dist
+const WEB_DIST = path.join(__dirname, "..", "..", "web", "dist");
+app.use(express.static(WEB_DIST));
+// SPA fallback — hash routes never hit the server, but serve index.html for /
+app.use((_req, res) => {
+  res.sendFile(path.join(WEB_DIST, "index.html"));
+});
+
 // ── Startup ───────────────────────────────────────────────────────────────────
 app.listen(PORT, async () => {
   console.log(`[stakely-api] listening on :${PORT}`);
 
-  // Seed matches from TxLINE on startup
   try {
     const count = await syncFixtures();
     console.log(`[startup] synced ${count} fixtures from TxLINE`);
@@ -51,10 +61,8 @@ app.listen(PORT, async () => {
     console.warn("[startup] fixture sync failed:", e.message);
   }
 
-  // Start live match poller
   startPoller();
 
-  // Register Telegram webhook (Railway sets RAILWAY_PUBLIC_DOMAIN)
   const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
   if (domain) {
     await registerWebhook(`https://${domain}/api/telegram/webhook`).catch(() => null);
