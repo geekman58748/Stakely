@@ -7,47 +7,52 @@
 
 ---
 
-## Infrastructure — all live, all independent of Replit
+## Infrastructure — all live
 
 | Service | URL / Location | Notes |
 |---|---|---|
-| API server | `https://stakely-production.up.railway.app` | Railway, auto-deploys from `main` branch, root dir: `api/` |
-| Database | Supabase (check dashboard for URL) | Project name: Stakely |
+| API server | `https://stakely-production.up.railway.app` | Railway, auto-deploys from `main`, root dir: `api/` |
+| Database | Supabase (check dashboard) | Project name: Stakely |
 | Telegram bot | @StakelyAgentbot | Webhook registered to Railway URL |
 | TxLINE devnet | `https://txline-dev.txodds.com` | Subscription active on devnet |
+| Escrow program | `J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai` | ✅ Verified live on Solana devnet |
 | GitHub | `geekman58748/Stakely` | All code lives here |
 
 ---
 
-## Secrets — where to find each one
+## What's merged and deployed (as of July 17, 2026)
 
-Re-add these to the new Replit session:
+### ✅ API — `https://stakely-production.up.railway.app/api/health`
+```json
+{ "ok": true, "supabase": true, "capabilities": { "escrowVerification": true, "contractVersion": "v1" } }
+```
+- All 17 routes live
+- `escrowVerification: true` — frontend safety gate unlocked
+- On-chain keeper settlement wired: `settle_escrow` instruction built and signed by keeper wallet
+- Chain-first: DB never updates until Solana confirms
+- Settle_tx stored in bets table after settlement
+- Poller auto-transitions scheduled → live → finished
+- Telegram pings + roasts active
 
-| Secret name | Where to get it |
-|---|---|
-| `GITHUB_PAT` | GitHub → Settings → Developer Settings → Personal Access Tokens |
-| `SUPABASE_URL` | Supabase dashboard → Project Settings → API |
-| `SUPABASE_ANON_KEY` | Supabase dashboard → Project Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard → Project Settings → API |
-| `TXLINE_API_TOKEN` | Retrieve from Railway or the TxLINE dashboard. Rotate the previously exposed token before the next deploy. |
-| `STAKELY_DEV_WALLET` | The devnet keypair JSON array — check old Replit secrets or Railway |
-| `TELEGRAM_BOT_TOKEN` | Already set on Railway. Get from @BotFather if needed |
+### ✅ Frontend — `web/` (merged, needs Railway static service — see below)
+- 6 pages: Discover, Matches, Match Detail, My Bets, Leaderboard, Receipts
+- Phantom/Solflare wallet connection
+- Real escrow PDA derivation + Anchor instruction construction
+- Leaderboard now pulls real data from `/api/leaderboard`
+- Proof-aware receipts
+- Railway deploy config: `web/nixpacks.toml` + `web/railway.json` committed
 
-Railway env vars already set (don't need to re-add to Replit unless agent needs them):
-- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-- `TXLINE_API_TOKEN`, `TXLINE_NETWORK=devnet`, `TXLINE_USE_MOCK=false`
-- `TELEGRAM_BOT_TOKEN`
-- `RAILWAY_PUBLIC_DOMAIN=stakely-production.up.railway.app`
+### ✅ Solana escrow program
+- Program ID: `J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai` — executable on devnet
+- TxLINE validation program: `6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J`
+- Keeper wallet: `Cgdeb6T6SshYt2eotqhwJktqGcfsEoa98kmkRkCpKqir`
+- `STAKELY_DEV_WALLET` set as Replit secret ✅ — must also be set on Railway
 
 ---
 
-## What's built
+## ⚠️ Manual steps still needed (before demo)
 
-### ✅ Supabase schema (`db/schema.sql`)
-7 tables: `users`, `matches`, `bets`, `bot_configs`, `agent_predictions`, `match_events`, `telegram_link_codes`  
-Indexes, RLS, leaderboard view, streak trigger stubs.
-
-**Still needs (paste in Supabase SQL editor):**
+### 1. Supabase SQL editor — paste these two functions
 ```sql
 CREATE OR REPLACE FUNCTION increment_streak_win(user_id uuid)
 RETURNS void LANGUAGE sql AS $$
@@ -60,125 +65,46 @@ RETURNS void LANGUAGE sql AS $$
 $$;
 ```
 
-### ✅ TxLINE client (`api/src/lib/txline.ts`)
-- Dual-header auth: `Authorization: Bearer <guest_jwt>` + `X-Api-Token: <apiToken>`
-- Correct endpoints: `/api/fixtures/snapshot`, `/api/odds/snapshot/:id`, `/api/scores/snapshot/:id`
-- Guest JWT auto-refreshes every 29 days
-- Mock fallback: `TXLINE_USE_MOCK=true`
-- **Currently syncing 13 real devnet fixtures on startup**
-
-### ✅ Express API (`api/`) — live on Railway
-17 routes across 6 files:
-
-| Route | Purpose |
+### 2. Railway — API service env vars (verify these exist, add if missing)
+| Var | Value |
 |---|---|
-| `GET /api/health` | Status check |
-| `GET /api/matches` | List matches |
-| `GET /api/matches/live` | Live scores |
-| `GET /api/matches/:id` | Single match + odds |
-| `POST /api/matches/sync` | Re-seed from TxLINE |
-| `POST /api/users` | Register wallet (first sign-in) |
-| `GET /api/users/me` | Current user |
-| `PATCH /api/users/me` | Update display name |
-| `GET /api/users/:wallet` | Public profile |
-| `GET /api/bets/open` | Open challenges |
-| `POST /api/bets` | Create bet |
-| `PATCH /api/bets/:id/accept` | Accept bet |
-| `PATCH /api/bets/:id/cancel` | Cancel bet |
-| `POST /api/bets/:id/settle` | Settle + store Merkle proof |
-| `GET /api/leaderboard` | Top 50 by streak |
-| `GET /api/bots/config` | Get AI agent config |
-| `PUT /api/bots/config` | Set AI agent config |
-| `POST /api/bots/predict/:matchId` | Run AI prediction |
-| `POST /api/telegram/link-code` | Generate wallet↔Telegram code |
-| `POST /api/telegram/verify` | Complete link (REST) |
-| `GET /api/telegram/user/:tgId` | Look up by Telegram ID |
-| `POST /api/telegram/webhook` | Telegram bot webhook handler |
+| STAKELY_DEV_WALLET | [the JSON keypair array from your secrets] |
+| TXLINE_API_TOKEN | `txoracle_api_2dffaac495e54767af7e1bb664778ef6` |
+| TXLINE_USE_MOCK | `false` |
+| TXLINE_NETWORK | `devnet` |
+| SOLANA_RPC_URL | `https://api.devnet.solana.com` |
+| ESCROW_PROGRAM_ID | `J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai` |
 
-**Wallet auth:** All protected routes require 3 headers:
-```
-x-wallet-address: <base58 pubkey>
-x-signature:      <base58 nacl detached sig of "stakely-auth:<timestamp>">
-x-timestamp:      <unix ms, must be within 5 min>
-```
+**Note:** Health is showing `"txline": "mock"` — this means TXLINE_API_TOKEN is missing or blank on Railway. Re-add it and redeploy.
 
-### ✅ Telegram bot
-- Webhook: `https://stakely-production.up.railway.app/api/telegram/webhook`
-- Commands: `/start`, `/link <code>`, `/scores`, `/bets`
-- Notifications: challenge sent/received, bet accepted, goal scored, match finished, settlement (with roasts)
-- Roast bank in `api/src/lib/telegram.ts` — human-sounding, not AI
-
-### ✅ Solana Anchor escrow (`escrow/`)
-Full program written in `programs/stakely-escrow/src/lib.rs`.  
-Instructions: `initialize`, `create_escrow`, `accept_escrow`, `settle_escrow`, `cancel_escrow`  
-The contract builds locally with Anchor 0.31.0 and is deployed on devnet at `J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai`. The keeper config is initialized.
-Deploy script: `escrow/scripts/deploy.ts`
+### 3. Railway — add a NEW static service for the web frontend
+1. Railway dashboard → New Service → GitHub repo → root dir: `web/`
+2. Build command: `npm ci && npm run build`
+3. Start command: `npx serve dist -l $PORT`
+4. Add these env vars to the web service:
+   | Var | Value |
+   |---|---|
+   | VITE_API_URL | `https://stakely-production.up.railway.app` |
+   | VITE_SOLANA_RPC_URL | `https://api.devnet.solana.com` |
+   | VITE_ESCROW_PROGRAM_ID | `J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai` |
+   | VITE_USDC_MINT | `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` |
 
 ---
 
-## What's left (priority order)
-
-| # | Item | Notes |
-|---|---|---|
-| 1 | **Streak SQL functions** | Paste 2 functions above into Supabase SQL editor. 2 min. |
-| 2 | **Railway escrow config** | Add `ESCROW_PROGRAM_ID`, `SOLANA_RPC_URL`, and a new `KEEPER_API_SECRET`. Keep the keeper key server-side only. |
-| 3 | **Accept challenge UI** | Submit `accept_escrow`, then send the confirmed `accept_tx` to the API. |
-| 4 | **Merkle proof receipts** | Validate TxLINE stat proof on-chain before the keeper settles. |
-| 5 | **TxLINE token audit** | Rotate the exposed token and confirm Railway is not silently using mock mode. |
-| 6 | **End-to-end test** | Full bet lifecycle with two real devnet wallets. |
-| 7 | **Demo video + submission** | July 19 deadline. |
+## Mainnet P0 checklist (from MAINNET_READINESS.md)
+- [ ] Fix on-chain settlement: poller must call `settle_escrow` ✅ DONE
+- [ ] Deploy API capability contract: `escrowVerification: true` ✅ DONE
+- [ ] Run full devnet end-to-end: 2 wallets, real fixture, full receipt
+- [ ] Fix keeper: bind `winner_token_account` constraint + TxLINE CPI (for mainnet)
+- [ ] Security review + legal/compliance before real funds
 
 ---
 
-## Ola's frontend integration guide
-
-**Base URL:** `https://stakely-production.up.railway.app` (set as `VITE_API_URL`)
-
-**Packages currently used:**
-```bash
-npm install @coral-xyz/anchor @solana/web3.js bs58 buffer
-```
-
-**Auth pattern (every protected request):**
-```ts
-const ts  = Date.now().toString();
-const sig = bs58.encode(await wallet.signMessage(
-              new TextEncoder().encode(`stakely-auth:${ts}`)));
-
-headers: {
-  "x-wallet-address": wallet.publicKey.toBase58(),
-  "x-signature":      sig,
-  "x-timestamp":      ts,
-}
-```
-
-**Screen → endpoint map:**
-- Match list: `GET /api/matches`
-- Match detail + odds: `GET /api/matches/:id`
-- Live scores: `GET /api/matches/live`
-- Open bets: `GET /api/bets/open`
-- Create bet: `POST /api/bets` after on-chain funding, with `{ id, match_id, creator_side, amount_usdc, escrow_pda, create_tx }`
-- Accept bet: `PATCH /api/bets/:id/accept` after on-chain funding, with `{ accept_tx }`
-- My bets: `GET /api/bets?role=mine`
-- Leaderboard: `GET /api/leaderboard`
-- AI predict: `POST /api/bots/predict/:matchId`
-- Link Telegram: `POST /api/telegram/link-code` → show 6-char code to user
-- First sign-in: `POST /api/users` `{ display_name? }`
-
----
-
-## Known quirks
-
-- TxLINE devnet returns real Friendlies fixtures, WC 2026 fixtures appear as scheduled
-- Telegram `/link` flow requires user to exist in `users` table first (frontend creates this on sign-in)
-- Escrow is deployed on devnet; Railway still needs the program ID and keeper environment configuration
-- Railway sets `PORT` dynamically — never hardcode 4000 in code (already handled)
-- TxLINE guest JWT has 30-day TTL, auto-refreshed in client
-
----
-
-## Resuming in a new session
-
-1. Add all secrets listed above to new Replit
-2. The code is all on GitHub — agent can read it directly
-3. Tell the new agent: "Read HANDOFF.md in the stakely/ directory on GitHub repo geekman58748/Stakely and continue from there"
+## Secrets location
+| Secret | Where |
+|---|---|
+| GITHUB_PAT | Replit secrets |
+| STAKELY_DEV_WALLET | Replit secrets + Railway API service |
+| SUPABASE_* | Railway API service env vars |
+| TXLINE_API_TOKEN | Railway API service env vars |
+| TELEGRAM_BOT_TOKEN | Railway API service env vars |
