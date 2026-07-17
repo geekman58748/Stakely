@@ -4,8 +4,9 @@
   "private": true,
   "main": "dist/index.js",
   "scripts": {
+    "build-web": "sh -c 'cd ../web && npm ci && npm run build'",
+    "build": "npm run build-web && tsc",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
     "start": "node dist/index.js"
   },
   "dependencies": {
