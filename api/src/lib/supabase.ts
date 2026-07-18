@@ -1,14 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
 
-const url  = process.env.SUPABASE_URL ?? "";
-// Accept either name so Railway env var mismatches don't crash startup
-const key  = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_KEY ?? "";
+const url  = process.env.SUPABASE_URL;
+const key  = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_KEY;
 
 if (!url || !key) {
-  console.error("[supabase] WARNING: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing — DB calls will fail but app will still start");
+  console.error("[supabase] FATAL: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing — set these on Railway");
 }
 
 // Service role client — bypasses RLS, server-side only
-export const db = createClient(url, key, {
+// Use placeholder URL to avoid synchronous throw from createClient when env var missing
+export const db = createClient(url ?? "https://placeholder.supabase.co", key ?? "placeholder", {
   auth: { persistSession: false },
 });
