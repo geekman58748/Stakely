@@ -1,14 +1,15 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const url  = process.env.SUPABASE_URL;
-const key  = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_KEY;
+const url = process.env.SUPABASE_URL ?? "";
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_KEY ?? "";
 
-if (!url || !key) {
-  console.error("[supabase] FATAL: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing — set these on Railway");
+let _db: SupabaseClient;
+try {
+  _db = createClient(url, key, { auth: { persistSession: false } });
+} catch {
+  console.error("[supabase] createClient failed — SUPABASE_URL or key is invalid/missing. DB calls will error.");
+  // Create with dummy values so the import doesn't crash the process
+  _db = createClient("https://aaaaaaaaaa.supabase.co", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", { auth: { persistSession: false } });
 }
 
-// Service role client — bypasses RLS, server-side only
-// Use placeholder URL to avoid synchronous throw from createClient when env var missing
-export const db = createClient(url ?? "https://placeholder.supabase.co", key ?? "placeholder", {
-  auth: { persistSession: false },
-});
+export const db = _db;
