@@ -71,7 +71,10 @@ class TxLineRealClient {
     if (this.guestJwt && Date.now() < this.jwtExpiresAt - 86_400_000) {
       return this.guestJwt;
     }
-    const res = await fetch(`${this.apiOrigin}/auth/guest/start`, { method: "POST" });
+    const res = await fetch(`${this.apiOrigin}/auth/guest/start`, {
+      method: "POST",
+      headers: { "X-Api-Token": process.env.TXLINE_API_TOKEN! },
+    });
     if (!res.ok) throw new Error(`Failed to obtain guest JWT: ${res.status}`);
     const data = await res.json() as { token: string };
     this.guestJwt    = data.token;
