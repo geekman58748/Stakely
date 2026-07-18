@@ -48,7 +48,7 @@ app.get("/api/health", (_req, res) => {
 // Pre-built web SPA lives in api/web-dist/ (committed to repo).
 // Load index.html into memory at startup to avoid per-request fs calls.
 import { existsSync, readFileSync } from "fs";
-const WEB_DIST = path.join(__dirname, "..", "web-dist", "dist");
+const WEB_DIST = path.join(__dirname, "..", "web-dist");
 const INDEX_HTML_PATH = path.join(WEB_DIST, "index.html");
 console.log(`[web] WEB_DIST=${WEB_DIST} exists=${existsSync(WEB_DIST)} index=${existsSync(INDEX_HTML_PATH)}`);
 let indexHtml = "";
