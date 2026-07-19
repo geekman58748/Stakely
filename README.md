@@ -8,6 +8,25 @@ Built for the **TxLINE / TxODDS FIFA World Cup 2026 Hackathon — Track 1: Marke
 
 ---
 
+## Screenshots
+
+### Discover — live markets with real TxLINE odds
+![Discover](docs/screenshots/discover.png)
+
+### Matches — 17 World Cup fixtures, live scores
+![Matches](docs/screenshots/matches.png)
+
+### My Bets — personal challenge desk, wallet-authenticated
+![My Bets](docs/screenshots/my-bets.png)
+
+### Leaderboard — global & friends ranking by win streak
+![Leaderboard](docs/screenshots/leaderboard.png)
+
+### Settlement Receipts — on-chain proof archive
+![Receipts](docs/screenshots/receipts.png)
+
+---
+
 ## What is Stakely?
 
 Stakely lets two people bet directly against each other on a match outcome. No house, no bookmaker. Funds are locked in a Solana escrow smart contract, and the result is settled automatically using a **TxLINE cryptographic proof** — verified on-chain. Every payout has a permanent, auditable receipt.
