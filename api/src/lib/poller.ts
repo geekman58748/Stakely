@@ -49,8 +49,7 @@ async function tick() {
       .select("id,home_team,away_team,status,home_score,away_score")
       .in("status", ["live", "halftime"]);
 
-    if (!liveMatches?.length) return;
-
+    if (liveMatches?.length) {
     await Promise.all(liveMatches.map(async (match) => {
       let score;
       try { score = await txline.getScore(match.id); } catch { return; }
@@ -70,6 +69,36 @@ async function tick() {
           score.homeScore, score.awayScore, score.minute ?? undefined);
       }
     }));
+    } // end if (liveMatches?.length)
+
+    // Backfill final scores for finished matches that still show 0-0.
+    // These were seeded by syncFixtures() before their match ended, so the
+    // poller never had a chance to write a real score.
+    try {
+      const { data: finishedZero } = await db.from('matches')
+        .select('id')
+        .eq('status', 'finished')
+        .eq('home_score', 0)
+        .eq('away_score', 0);
+      if (finishedZero?.length) {
+        await Promise.allSettled(finishedZero.map(async (m: { id: string }) => {
+          try {
+            const score = await txline.getScore(m.id);
+            if (score.homeScore !== 0 || score.awayScore !== 0) {
+              await db.from('matches').update({
+                home_score: score.homeScore,
+                away_score: score.awayScore,
+                updated_at: new Date().toISOString(),
+              }).eq('id', m.id);
+              console.log('[poller] backfilled finished match', m.id, score.homeScore + '-' + score.awayScore);
+            }
+          } catch { /* TxLINE may not have historical data for this fixture */ }
+        }));
+      }
+    } catch (e: any) {
+      console.error('[poller] backfill error:', e.message);
+    }
+
     await pingUpcomingMatches();
   } catch (e: any) {
     console.error("[poller] tick error:", e.message);
