@@ -24,6 +24,43 @@ async function syncFixtures() {
   }));
   const { error } = await db.from("matches").upsert(rows, { onConflict: "id" });
   if (error) console.error("[syncFixtures]", error.message);
+
+  // Backfill final scores for finished/past fixtures that still show 0-0.
+  // syncFixtures() only writes schedule fields (no scores), so any match that
+  // was already finished when seeded lands with home_score=0, away_score=0 and
+  // is never touched again by the poller. Fetch real scores here to fix that.
+  const pastIds = realFixtures
+    .filter(f => f.status === "finished" || new Date(f.kickoffAt) < new Date())
+    .map(f => f.id);
+
+  if (pastIds.length) {
+    const { data: zeroRows } = await db.from("matches")
+      .select("id")
+      .in("id", pastIds)
+      .eq("home_score", 0)
+      .eq("away_score", 0);
+
+    if (zeroRows?.length) {
+      console.log(`[syncFixtures] backfilling scores for ${zeroRows.length} finished 0-0 matches`);
+      await Promise.allSettled(zeroRows.map(async (m) => {
+        try {
+          const score = await txline.getScore(m.id);
+          if (score.homeScore !== 0 || score.awayScore !== 0) {
+            await db.from("matches").update({
+              home_score: score.homeScore,
+              away_score: score.awayScore,
+              status: score.status,
+              updated_at: new Date().toISOString(),
+            }).eq("id", m.id);
+            console.log(`[syncFixtures] backfilled ${m.id}: ${score.homeScore}-${score.awayScore}`);
+          }
+        } catch (e: any) {
+          console.warn(`[syncFixtures] score fetch failed for ${m.id}:`, e.message);
+        }
+      }));
+    }
+  }
+
   return realFixtures.length;
 }
 
