@@ -1,125 +1,167 @@
-# Stakely Project Plan
+# Stakely ⚡
 
-## Product Overview
+> **P2P sports prediction markets on Solana — stake against friends, settle on-chain.**
 
-Stakely is a peer-to-peer (P2P) sports wagering web app for the World Cup. Users create and accept micro wagers (as low as $1) directly against friends using stablecoins (USDC/USDT) on Solana. Wagers are held in a secure escrow smart contract and settled automatically via decentralized data oracles (TxlineOdds). The app includes a companion Telegram bot for social mapping and real-time match alerts, alongside a gamified AI Agent track where users customize autonomous prediction bots to analyze games and trigger bets.
+Live demo → **[stakely-production.up.railway.app](https://stakely-production.up.railway.app/#discover)**
 
----
-
-## Track 1: P2P Betting & Social Loop
-
-### 1. Simplified Betting Engine
-- **Markets supported:** Home Win, Away Win, Draw only (no prop bets — keeps oracle payload and gas costs low)
-- **Escrow flow:**
-  1. User A creates a bet, enters counterparty's username, deposits $1 into escrow
-  2. User B gets an alert, accepts, matches the $1 deposit
-  3. Funds locked in smart contract
-  4. At final whistle, oracle pushes result, contract auto-transfers $2 to winner
-
-### 2. Telegram Social Bridge
-- **Username mapping:** OAuth or deep-link onboarding (`t.me/YourBot?start=id`) maps wallet ↔ `@username` ↔ Telegram Chat ID
-- **In-app search:** Search a friend's Telegram username in the web app to send a bet request
-- **Automated alerts via bot:**
-  - Challenge Received (link to accept)
-  - Match Kick-off (funds locked confirmation)
-  - Match Event (goal alerts affecting active bet)
-  - Settlement (payout notice + one-click "Double or Nothing")
-
-### 3. Core Retention Features
-- **Negotiation:** "Counter" button to change team/amount before signing
-- **Visual bet statuses:** Challenged (countdown timer) → Locked & Loaded → Sweat Zone (live ticker) → Crowned / Ripped
-- **Streaks & leaderboards:** Win streak tracked in DB, 🔥 emoji next to username, resets on loss, public leaderboard ranked by streak
+Built for the **TxLINE / TxODDS FIFA World Cup 2026 Hackathon — Track 1: Markets**
 
 ---
 
-## Track 2: Custom AI Battle Agents
+## What is Stakely?
 
-### 1. Bot "Chassis" Selection
-Users pick one of three archetypes governing logic parameters:
-- **The Degenerate** — aggressive, prioritizes long odds/high risk
-- **The Professor** — quantitative, historical metrics, safe margins
-- **The Fanboy** — emotionally biased toward historic heavyweight teams
+Stakely lets two people bet directly against each other on a match outcome. No house, no bookmaker. Funds are locked in a Solana escrow smart contract, and the result is settled automatically using a **TxLINE cryptographic proof** — verified on-chain. Every payout has a permanent, auditable receipt.
 
-### 2. Training & Upgrading Mechanics
-Saved as a JSON profile per user:
-- **Risk Spectrum Slider:** 1–10
-- **Data Input Toggles:** e.g. Historical Head-to-Head Stats, Twitter/X Fan Sentiment Scraping
-- **Logic Weights:** math/data vs. social hype balance
-
-### 3. Execution Loop
-1. **Match Prompt:** server pulls upcoming match data + fan sentiment, combines with user's bot JSON config into an LLM prompt
-2. **Output:** LLM returns structured JSON — Prediction (Home/Away/Draw), Confidence %, Technical Analysis, persona-specific NFA disclaimer
-3. **Action:** frontend shows the breakdown; CTA button lets user approve a $1 escrow bet based on the agent's prediction
+- Bet as low as **$1 USDC**
+- Wallet-native auth — no email, no KYC
+- Settlement is trustless: oracle result → Anchor program → winner paid
+- Companion **Telegram bot** for challenge alerts and match notifications
 
 ---
 
-## Roles
+## Architecture
 
-### Maxx
-1. Backend (API, server infra)
-2. Blockchain / escrow smart contract & payments (Solana, USDC/USDT)
-3. Telegram bot integration (username & social layer, alerts)
-4. Database (schema, wallet↔Telegram mapping, streak tracking, bot configs)
-
-### Ola
-1. UI/UX (Rainbow-inspired design system)
-2. Wallet sign-in & wallet features
-3. Dashboards (bet statuses, leaderboard, streaks)
-4. Track 2 dashboard (chassis selection, sliders, toggles, agent output display)
-5. OpenAI/Anthropic background cron — feeds user/match data into the LLM and returns structured payload output
-
----
-
-## Suggested Branch Structure
-
-Working off `main`, each person branches per feature to avoid stepping on shared files (especially DB schema and API contracts — coordinate those first).
-
-**Maxx:**
-- `feature/escrow-contract`
-- `feature/backend-api`
-- `feature/telegram-bot`
-- `feature/db-schema`
-
-**Ola:**
-- `feature/ui-design-system`
-- `feature/wallet-connect`
-- `feature/dashboards`
-- `feature/track2-dashboard`
-- `feature/llm-cron`
-
-**Workflow:**
-```bash
-git checkout main
-git pull
-git checkout -b feature/your-branch-name
-# ... work, commit ...
-git push -u origin feature/your-branch-name
-# open a PR into main when ready, review each other's before merging
+```
+Browser (React + Vite)
+    │
+    ├── Solana Wallet Adapter ──► Anchor Escrow Program (devnet)
+    │                                  ▲
+    └── REST API (Express / Railway)   │ settle ix
+            │                          │
+            ├── Supabase (Postgres)     │
+            ├── TxLINE SSE feed ────────┘
+            └── Telegram Bot (webhooks)
 ```
 
 ---
 
-## Suggested Build Order (MVP-first)
+## Tech Stack
 
-| Phase | Focus | Owner(s) |
-|---|---|---|
-| 1 | DB schema + wallet↔Telegram mapping | Maxx |
-| 2 | Wallet connect + basic UI shell | Ola |
-| 3 | Escrow contract (create/accept/lock) | Maxx |
-| 4 | Bet creation/accept flow UI + statuses | Ola |
-| 5 | Telegram bot alerts (challenge, kickoff) | Maxx |
-| 6 | Oracle integration + auto-settlement | Maxx |
-| 7 | Streaks & leaderboard | Maxx (DB) + Ola (UI) |
-| 8 | AI Agent chassis + config sliders (UI) | Ola |
-| 9 | LLM cron + prompt/output pipeline | Ola |
-| 10 | Agent → $1 escrow bet CTA wired end-to-end | Maxx + Ola |
+| Layer | Tech |
+|---|---|
+| Frontend | React 18, Vite, TypeScript, Solana Wallet Adapter |
+| Backend | Express 5, TypeScript, Railway |
+| Database | Supabase (Postgres) |
+| Blockchain | Solana (devnet), Anchor framework |
+| Oracle | TxLINE / TxODDS (live World Cup data + Merkle proofs) |
+| Payments | Circle devnet USDC |
+| Bot | Telegram Bot API |
 
 ---
 
-## Open Questions / To Decide
-- [ ] Which Solana escrow framework (Anchor?) will be used
-- [ ] TxlineOdds oracle integration details / API access
-- [ ] Telegram bot framework (node-telegram-bot-api, grammY, etc.)
-- [ ] LLM provider (OpenAI vs Anthropic) — final decision + fallback
-- [ ] Hosting/infra for the cron job (serverless vs dedicated worker)
-- [ ] Testnet vs mainnet for MVP/demo
+## Core Flow
+
+```
+1. User A finds a live TxLINE fixture on Discover
+2. User A creates a challenge → funds Stakely escrow on Solana (USDC)
+3. User B receives a Telegram alert → accepts → matches the deposit
+4. Escrow vault now holds 2× USDC, locked until final whistle
+5. TxLINE pushes final score + Merkle proof to the API
+6. Keeper validates proof and fires settle instruction on-chain
+7. Winner receives full pot; settlement receipt minted permanently
+```
+
+---
+
+## Smart Contract
+
+Solana Anchor program — `stakely-escrow`
+
+- **Devnet program ID:** `J2zMD6jRMFetFr82nqk1jBsmdSYSuDKKsbfnJRqHRcai`
+- **TxLINE verifier (mainnet):** `9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA`
+- **USDC mint (mainnet):** `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
+
+### Devnet transaction evidence
+
+| Step | Signature |
+|---|---|
+| Create + fund escrow | [2RYrnQ…AmeziE](https://explorer.solana.com/tx/2RYrnQL8wT3XWQVz3hrKKSxb9pZoZWGTLb8xmf1kDfNpyECJupU881TjxBJUiUZVHwpALzsnxq39hktGqPAmeziE?cluster=devnet) |
+| Accept + match funds | [5edH2L…jqfkry](https://explorer.solana.com/tx/5edH2LeSEoZMMnmBUJSY2iWePMWwLZveSAo8uCRfj1vq7X755BAEt8vL5729aFSPDhVrgKH8FNVBSX6ZxZjqfkry?cluster=devnet) |
+| Settle + pay winner | [8iW1u4…mnnYC](https://explorer.solana.com/tx/8iW1u4wNATXrnJQtautrWwQE5R3CETnXD7YZgop7EHTZmxHptKxfRGDPF9sMeAqWvTfgZK7p7rnLniKegqymnYC?cluster=devnet) |
+
+---
+
+## API Routes
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/health` | System status + capabilities |
+| GET | `/api/matches` | Live TxLINE fixtures |
+| GET | `/api/bets` | Open challenges |
+| POST | `/api/bets` | Create a challenge |
+| GET | `/api/leaderboard` | Top predictors by win streak |
+| GET | `/api/users/:wallet` | User profile |
+| POST | `/api/telegram` | Telegram webhook handler |
+
+---
+
+## Running Locally
+
+### Prerequisites
+
+- Node 20+ and pnpm
+- Supabase project (or local Postgres)
+- TxLINE API key (devnet)
+- Solana CLI + Anchor
+
+### API
+
+```bash
+cd api
+cp .env.example .env
+# fill in SUPABASE_URL, SUPABASE_SERVICE_KEY, TXLINE_API_KEY, etc.
+pnpm install
+pnpm dev
+```
+
+### Web
+
+```bash
+cd web
+cp .env.example .env
+pnpm install
+pnpm dev
+```
+
+### Escrow (Anchor)
+
+```bash
+cd escrow
+anchor build
+anchor test
+```
+
+---
+
+## Repo Structure
+
+```
+Stakely/
+├── api/          # Express backend (deployed on Railway)
+├── web/          # React + Vite frontend
+├── escrow/       # Solana Anchor smart contract
+├── db/           # Supabase schema
+├── txline/       # TxLINE oracle client
+└── design/       # UI reference assets
+```
+
+---
+
+## Status
+
+> **Running on Solana devnet.** The full escrow lifecycle is verified end-to-end on devnet. Mainnet promotion requires a funded deployer wallet + TxLINE mainnet subscription. See [`MAINNET_READINESS.md`](./MAINNET_READINESS.md) for the complete checklist.
+
+---
+
+## Team
+
+| Name | Role |
+|---|---|
+| Maxx | Backend, smart contract, blockchain |
+| Ola | Product, frontend, design |
+
+---
+
+## License
+
+MIT
